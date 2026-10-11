@@ -1,7 +1,7 @@
-import { createServerCornerGeometry, createNestedServerCornerGeometry, offsetServerCornerPath } from "./server-corner-geometry.js";
+import { createServerCornerGeometry, offsetServerCornerPath } from "./server-corner-geometry.js";
 import type { ServerCornerGeometry } from "./server-corner-geometry.js";
-export { createServerCornerGeometry, createNestedServerCornerGeometry, serverCornerProfile, offsetServerCornerPath, SERVER_CORNER_PROFILE, SERVER_CORNER_CONTROL_POINTS, SERVER_CORNER_PROFILE_BOUNDS, SERVER_CORNER_PHOTO_EXTENT } from "./server-corner-geometry.js";
-export type { ServerCornerGeometry, ServerCornerOptions, ServerCornerPoint, ServerCornerCurve, ServerCornerSource, ServerCornerName, ServerCornerNested, NestedServerCornerOptions } from "./server-corner-geometry.js";
+export { createServerCornerGeometry, serverCornerProfile, offsetServerCornerPath, SERVER_CORNER_PROFILE, SERVER_CORNER_CONTROL_POINTS, SERVER_CORNER_PROFILE_BOUNDS, SERVER_CORNER_PHOTO_EXTENT } from "./server-corner-geometry.js";
+export type { ServerCornerGeometry, ServerCornerOptions, ServerCornerPoint, ServerCornerCurve, ServerCornerSource } from "./server-corner-geometry.js";
 
 export interface ServerCornersController { refresh(): void; stop(): void }
 const controllers = new WeakMap<Document, ServerCornersController>();
@@ -15,7 +15,7 @@ const transitionNames = ["transition-property", "transition-duration", "transiti
 const ownedPaintProperty = (name: string) => /^(?:background(?:-|$)|border(?:-|$)|box-shadow$|mask(?:-|$)|backdrop-filter$)/.test(name);
 const paintCache = new WeakMap<ServerCornerGeometry, Map<string, { image: string; margin: number; slice?: number } | null>>();
 function snapshot(css: CSSStyleDeclaration): CSSStyleDeclaration {
-  const properties = ["width", "height", "box-sizing", "display", "position", "transform", "perspective", "translate", "rotate", "scale", "zoom", "overflow-x", "overflow-y", "border-image-source", "box-shadow", "background-color", "background-image", "backdrop-filter", "mask-image", "outline-width", "outline-offset", "--xcss-server-corner-extent", "--xcss-server-corner-mode", "--xcss-server-corner-nested"];
+  const properties = ["width", "height", "box-sizing", "display", "position", "overflow-x", "overflow-y", "border-image-source", "box-shadow", "background-color", "background-image", "backdrop-filter", "mask-image", "outline-width", "outline-offset", "--xcss-server-corner-extent", "--xcss-server-corner-mode"];
   for (const side of ["top", "right", "bottom", "left"]) properties.push(`padding-${side}`, `border-${side}-width`);
   const values = Object.fromEntries(properties.map(name => [name, css.getPropertyValue(name)]));
   for (const side of ["top", "right", "bottom", "left"]) {
@@ -67,7 +67,6 @@ function decoration(geometry: ServerCornerGeometry, css: CSSStyleDeclaration, la
   let cache = paintCache.get(geometry); if (!cache) { cache = new Map(); paintCache.set(geometry, cache); }
   if (cache.has(key)) return cache.get(key)!;
   if (styles.some((style, i) => widths[i] > 0 && !["solid", "dashed", "dotted", "none"].includes(style))) return null;
-  if (layers.some(s => s.spread <= -geometry.radius)) return null;
   if (geometry.canonical && !hasBackgroundImage && layers.length === 0 && widths.every(width => width === 0)) {
     // A nine-slice image stretches only the 1px straight centre strips. The
     // four Mac mini corners retain their physical dimensions, so equal-role tiles
@@ -113,16 +112,17 @@ function decoration(geometry: ServerCornerGeometry, css: CSSStyleDeclaration, la
 export function startServerCorners(document: Document): ServerCornersController {
   const previous = controllers.get(document); if (previous) return previous;
   const ownerView = document.defaultView;
-  if (!ownerView) return { refresh() {}, stop() {} };
+  if (!ownerView) throw new TypeError("Server corners require a live browser document");
   const view = ownerView;
-  // Unregistered custom properties inherit. Leave legacy engines at the
-  // authored fallback rather than opt a panel's descendants in accidentally.
-  if (typeof view.CSS?.registerProperty !== "function" || typeof view.ResizeObserver !== "function") return { refresh() {}, stop() {} };
   for (const registration of [
     { name: "--xcss-server-corner-extent", syntax: "<length-percentage>", inherits: false, initialValue: "0px" },
     { name: "--xcss-server-corner-mode", syntax: "*", inherits: false, initialValue: "paint" },
-    { name: "--xcss-server-corner-nested", syntax: "none | all | nearest", inherits: false, initialValue: "none" },
-  ]) { try { view.CSS.registerProperty(registration); } catch { /* Stylesheet already registered it. */ } }
+  ]) {
+    try { view.CSS.registerProperty(registration); }
+    catch (error) {
+      if (!(error instanceof view.DOMException) || error.name !== "InvalidModificationError") throw error;
+    }
+  }
   const records = new Map<HTMLElement, RecordState>();
   const draftStyle = document.createElement("div").style;
   const allProperties = Array.from(view.getComputedStyle(document.documentElement)).filter(name => !ownedPaintProperty(name));
@@ -239,47 +239,6 @@ export function startServerCorners(document: Document): ServerCornersController 
       if (!records.has(node)) prepareTransitions(node);
       candidates.push({ node, css: snapshot(view.getComputedStyle(node)), rect: node.getBoundingClientRect(), fragmented: node.getClientRects().length > 1 });
     }
-    const candidateByNode = new Map(candidates.map(candidate => [candidate.node, candidate]));
-    const geometryByNode = new Map<HTMLElement, ServerCornerGeometry>();
-    const nestedCandidates = new Map<HTMLElement, { follow: "all" | "nearest"; parent?: Candidate; reason?: string }>();
-    const coordinateSafety = new Map<HTMLElement, boolean>();
-    const translatedOnly = (value: string) => {
-      if (value === "" || value === "none") return true;
-      try {
-        const matrix = new view.DOMMatrixReadOnly(value);
-        return matrix.is2D && Math.abs(matrix.a - 1) < 1e-9 && Math.abs(matrix.d - 1) < 1e-9 && Math.abs(matrix.b) < 1e-9 && Math.abs(matrix.c) < 1e-9;
-      } catch { return false; }
-    };
-    const unsupportedCoordinates = (element: HTMLElement): boolean => {
-      const known = coordinateSafety.get(element); if (known !== undefined) return known;
-      const css = candidateByNode.get(element)?.css ?? view.getComputedStyle(element);
-      // A common translation cancels in the DOMRect difference. Other affine
-      // or 3D transforms distort CSS pixels and must retain independent corners.
-      const translate = css.getPropertyValue("translate").trim(), components = split(translate, "space");
-      const changed = !translatedOnly(css.getPropertyValue("transform").trim()) ||
-        ["perspective", "rotate", "scale"].some(name => { const value = css.getPropertyValue(name).trim(); return value !== "" && value !== "none"; }) ||
-        components.length > 2 && !/^[-+]?0(?:\.0+)?(?:px)?$/.test(components[2]) ||
-        !["", "normal", "1"].includes(css.getPropertyValue("zoom").trim());
-      const unsafe = changed || (element.parentElement !== null && unsupportedCoordinates(element.parentElement));
-      coordinateSafety.set(element, unsafe); return unsafe;
-    };
-    // Resolve ancestors and coordinate safety during the read phase. DOM order
-    // puts every ancestor before its child in the geometry/paint pass below.
-    for (const candidate of candidates) {
-      const { node, css } = candidate;
-      const follow = node.getAttribute("data-xcss-server-corner-nested") ?? css.getPropertyValue("--xcss-server-corner-nested").trim();
-      if (follow === "none" || follow === "") continue;
-      if (follow !== "all" && follow !== "nearest") {
-        nestedCandidates.set(node, { follow: "all", reason: "invalid-mode" }); continue;
-      }
-      let parent: Candidate | undefined;
-      for (let ancestor = node.parentElement; ancestor; ancestor = ancestor.parentElement) {
-        const possible = candidateByNode.get(ancestor);
-        if (possible && (ancestor.getAttribute("data-xcss-server-corner") ?? possible.css.getPropertyValue("--xcss-server-corner-mode").trim()) !== "none") { parent = possible; break; }
-      }
-      const reason = !parent ? "no-parent" : unsupportedCoordinates(node) ? "transformed-coordinates" : css.position === "fixed" || css.position === "sticky" ? "positioned-coordinates" : undefined;
-      nestedCandidates.set(node, { follow, parent, reason });
-    }
     for (const { node, css, rect, fragmented } of candidates) {
       const raw = node.getAttribute("data-xcss-server-corner-extent") ?? css.getPropertyValue("--xcss-server-corner-extent").trim();
       const mode = node.getAttribute("data-xcss-server-corner") ?? css.getPropertyValue("--xcss-server-corner-mode").trim();
@@ -298,18 +257,6 @@ export function startServerCorners(document: Document): ServerCornersController 
       let geometry: ServerCornerGeometry;
       try { geometry = createServerCornerGeometry({ width, height, extent, tolerance: 0.02 }); }
       catch { mark(node, "fallback", "invalid-geometry"); continue; }
-      const nesting = nestedCandidates.get(node);
-      let nestedReason = nesting?.reason;
-      if (nesting && !nestedReason) {
-        const parent = nesting.parent!, parentGeometry = geometryByNode.get(parent.node);
-        if (!parentGeometry) nestedReason = "parent-unavailable";
-        else {
-          try {
-            geometry = createNestedServerCornerGeometry({ width, height, extent, parent: parentGeometry, left: rect.left - parent.rect.left, top: rect.top - parent.rect.top, follow: nesting.follow, tolerance: .02 });
-            nestedReason = geometry.nested?.reason;
-          } catch { nestedReason = "invalid-geometry"; }
-        }
-      }
       const layers = shadows(css.boxShadow);
       if (!layers) { mark(node, "fallback", "inset-or-unsupported-shadow"); continue; }
       const hasImage = css.backgroundImage !== "none";
@@ -371,15 +318,13 @@ export function startServerCorners(document: Document): ServerCornersController 
       put(node, "border-image-repeat", "stretch");
       const clipping = mode === "clip" || css.overflowX === "hidden" || css.overflowX === "clip" || css.overflowY === "hidden" || css.overflowY === "clip";
       if (clipping) {
-        if (!view.CSS.supports("mask-clip", "no-clip")) { restore(node, record, false); mark(node, "fallback", "mask-no-clip-unavailable"); continue; }
         const margin = Math.max(painted.margin, Math.ceil(number(css.outlineWidth) + Math.abs(number(css.outlineOffset)) + 4));
         put(node, "mask-image", imageUrl(mask(geometry, margin)));
         put(node, "mask-clip", "no-clip"); put(node, "mask-origin", "border-box");
         put(node, "mask-size", `${fmt(width + margin * 2)}px ${fmt(height + margin * 2)}px`);
         put(node, "mask-position", `${-margin}px ${-margin}px`); put(node, "mask-repeat", "no-repeat");
       }
-      geometryByNode.set(node, geometry);
-      mark(node, clipping ? "clip" : "paint", nestedReason ? `nested-${nestedReason}` : undefined);
+      mark(node, clipping ? "clip" : "paint");
     }
     for (const [element, record] of records) {
       if (selected.has(element)) continue;

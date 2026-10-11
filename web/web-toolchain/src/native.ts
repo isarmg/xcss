@@ -7,6 +7,7 @@ export function createXcssNativeModuleViteConfig(options: { entry: string; outDi
     base: "./",
     plugins: [assetBudget(256 * 1024)],
     build: {
+      target: "esnext", cssTarget: "esnext", modulePreload: { polyfill: false },
       outDir: process.env.XCSS_WEB_DIST ?? options.outDir, emptyOutDir: true, sourcemap: false, assetsInlineLimit: 0, cssCodeSplit: false,
       rollupOptions: {
         input: options.entry, preserveEntrySignatures: "strict",

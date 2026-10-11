@@ -8,6 +8,6 @@ export function createXcssReactViteConfig(options: { base?: string; maxAssetByte
     ...(options.base === undefined ? {} : { base: options.base }),
     resolve: { dedupe: ["react", "react-dom"] },
     plugins: [react(), assetBudget(maximum)],
-    build: { outDir: process.env.XCSS_WEB_DIST ?? "dist", emptyOutDir: true, sourcemap: false, chunkSizeWarningLimit: Math.floor(maximum / 1024) },
+    build: { target: "esnext", cssTarget: "esnext", modulePreload: { polyfill: false }, outDir: process.env.XCSS_WEB_DIST ?? "dist", emptyOutDir: true, sourcemap: false, chunkSizeWarningLimit: Math.floor(maximum / 1024) },
   });
 }

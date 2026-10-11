@@ -13,9 +13,6 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
   --xcss-block-muted: #5f5f5f;
   --xcss-block-border: #e3e3e3;
   --xcss-content-spacing: var(--xcss-space-4, 16px);
-  --xcss-radius-sm: 14px;
-  --xcss-radius-md: 20px;
-  --xcss-radius-lg: 26px;
   color: var(--xcss-text-primary);
   background: var(--xcss-bg-page);
   body { margin: 0; }
@@ -74,7 +71,7 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
     min-width: 0;
     padding: 1rem;
     border: 0;
-    border-radius: 20px;
+    border-radius: 0;
     background: var(--xcss-bg-panel);
     overflow-wrap: anywhere;
   }
@@ -127,7 +124,7 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
   .xcss-log-date-controls .xcss-button { display: inline-flex; align-items: center; height: 30px; min-height: 30px; padding-block: 0; line-height: 30px; }
   .xcss-input { border-color: var(--xcss-block-border); background: transparent; }
   .xcss-status { border: 0; padding-inline: 0; }
-  .xcss-error, .xcss-empty, .xcss-loading { border: 0; border-radius: 20px; background: var(--xcss-bg-panel); margin-block: 1rem; }
+  .xcss-error, .xcss-empty, .xcss-loading { border: 0; border-radius: 0; background: var(--xcss-bg-panel); margin-block: 1rem; }
   .xcss-content-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 16px; margin-block: 16px; }
   .xcss-table.xcss-statistics-table { display: block; }
   .xcss-table.xcss-statistics-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -145,7 +142,7 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
   .xcss-content-table tr {
     display: grid; grid-template-rows: repeat(6, auto); align-content: start;
     min-width: 0; min-height: 190px; padding: .6rem 1rem;
-    border-radius: 20px; background: var(--xcss-bg-panel);
+    border-radius: 0; background: var(--xcss-bg-panel);
   }
   .xcss-content-table :is(th, td) { padding: .4rem 0; border: 0; min-width: 0; overflow-wrap: anywhere; }
   .xcss-content-table td[data-label]::before { content: attr(data-label); color: var(--xcss-block-muted); margin-inline-end: 2ch; }
@@ -157,7 +154,7 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
     min-width: 0;
     overflow: hidden;
     border: 0;
-    border-radius: 5.5556% / 8.3333%;
+    border-radius: 0;
     background: var(--xcss-bg-panel);
     font-weight: 400;
   }
@@ -178,7 +175,7 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
   /* The existing semantic labels, inputs and submit handler remain untouched.
    * Grid places their children in the original six rows, including the error row. */
   .xcss-auth-shell { padding: 24px; }
-  .xcss-auth-card { width: min(380px, 100%); border: 0; border-radius: 20px; }
+  .xcss-auth-card { width: min(380px, 100%); border: 0; border-radius: 0; }
   .xcss-login-controls { display: flex; align-items: center; gap: 8px; }
   .xcss-login-controls > button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; height: 44px; padding: 0 8px; line-height: 1; }
   .xcss-login-controls svg { width: var(--xcss-header-icon-size, 1em); height: var(--xcss-header-icon-size, 1em); }
@@ -195,7 +192,7 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
     container-type: size;
     aspect-ratio: 3 / 2;
     padding: 0;
-    border-radius: 5.5556% / 8.3333%;
+    border-radius: 0;
   }
   .xcss-auth-card:has(> form) > .xcss-product-identity,
   .xcss-auth-card > form > h1 {
@@ -277,8 +274,8 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
 
   /* Native-ESM pages use the same palette and block surfaces. */
   .login-card .card-row-label { color: var(--xcss-block-muted); }
-  body > .main { margin: var(--xcss-content-spacing); padding: var(--xcss-content-spacing); border-radius: 20px; background: var(--xcss-bg-panel); }
-  .action-dialog { border: 0; border-radius: 26px; background: var(--xcss-bg-panel); }
+  body > .main { margin: var(--xcss-content-spacing); padding: var(--xcss-content-spacing); border-radius: 0; background: var(--xcss-bg-panel); }
+  .action-dialog { border: 0; border-radius: 0; background: var(--xcss-bg-panel); }
 
   @media (forced-colors: active) {
     .xcss-content-card, .xcss-content-panel, .xcss-auth-card, .xcss-table-scroll, .xcss-dialog { border: 1px solid CanvasText; }

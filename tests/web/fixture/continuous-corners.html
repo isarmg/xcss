@@ -10,10 +10,9 @@
       import "../../../web/design-tokens/reset.css";
       import "../../../web/design-tokens/accessibility.css";
       import "../../../web/admin-ui/styles.css";
-      import { startServerCorners, createServerCornerGeometry, createNestedServerCornerGeometry } from "../../../web/admin-ui/src/server-corners.ts";
+      import { startServerCorners, createServerCornerGeometry } from "../../../web/admin-ui/src/server-corners.ts";
       window.startServerCorners = startServerCorners;
       window.createServerCornerGeometry = createServerCornerGeometry;
-      window.createNestedServerCornerGeometry = createNestedServerCornerGeometry;
       window.serverCorners = startServerCorners(document);
     </script>
     <style>
@@ -40,22 +39,10 @@
       #dark-surface { width:120px;height:60px;background:white; }
       html[data-theme=dark] #dark-surface { background:rgb(20,30,40); }
       #grid-row { display:grid; --xcss-server-corner-extent:12px; background:yellow; }
-      .nested-parent { --xcss-server-corner-extent:70px; position:relative; width:300px; height:210px; background:#dbeafe; border-radius:20px; }
-      .nested-child { --xcss-server-corner-extent:22px; position:absolute; left:18px; top:18px; background:#2563eb; border-radius:12px; }
-      #nested-all { --xcss-server-corner-nested:all; width:160px; height:128px; }
-      #nested-full { --xcss-server-corner-nested:nearest; width:264px; height:174px; }
-      #nested-scaled { --xcss-server-corner-nested:all; width:60px; height:44px; }
-      #nested-photo-parent, #nested-photo-all-parent { --xcss-server-corner-extent:48px; height:244px; }
-      #nested-photo, #nested-photo-all { left:13px; top:13px; width:274px; height:144px; --xcss-server-corner-extent:44px; }
-      #nested-photo { --xcss-server-corner-nested:nearest; }
-      #nested-photo-all { --xcss-server-corner-nested:all; }
-      #nested-unselected { position:absolute; left:100px; top:170px; width:30px; height:20px; background:red; border-radius:8px; }
-      #nested-independent { --xcss-server-corner-extent:12px; position:absolute; left:180px; top:160px; width:90px; height:40px; background:#ef4444; border-radius:8px; }
-      #nested-row-button { --xcss-server-corner-extent:10px; position:absolute; left:50px; top:100px; width:60px; height:24px; border:0; padding:0; background:#ef4444; }
-      #nested-no-match { --xcss-server-corner-nested:nearest; left:17px; top:30px; width:100px; height:80px; }
-      #nested-transformed { --xcss-server-corner-nested:all; width:100px; height:80px; transform:scale(.9); }
-      #nested-no-parent { --xcss-server-corner-nested:all; }
-      html[data-theme=dark] #nested-all { background:rgb(20,30,40); }
+      .nested-parent { --xcss-server-corner-extent:70px; position:relative; width:300px; height:210px; background:#dbeafe; border:1px solid blue; border-radius:0; }
+      .nested-child { --xcss-server-corner-extent:22px; position:absolute; left:18px; top:18px; width:160px; height:128px; background:#2563eb; border:1px solid blue; border-radius:0; }
+      #independent-row-button { --xcss-server-corner-extent:10px; position:absolute; left:50px; top:60px; width:60px; height:24px; border:1px solid blue; padding:0; background:#ef4444; }
+      html[data-theme=dark] #independent-child { background:rgb(20,30,40); }
     </style>
   </head>
   <body data-xcss-scope>
@@ -95,14 +82,7 @@
       <div class="test-surface" id="unequal"></div><div class="test-surface" id="dashed"></div><div class="test-surface" id="spread"></div>
       <button class="test-surface" id="state-control" aria-label="State probe"></button><div class="test-surface" id="dark-surface"></div>
       <table><tbody><tr id="grid-row"><td>Grid row</td></tr></tbody></table>
-      <div class="nested-parent" id="nested-all-parent"><div class="nested-child" id="nested-all"><button class="xcss-button" id="nested-row-button" aria-label="Independent row action">Go</button></div><div id="nested-unselected"></div><div id="nested-independent"></div></div>
-      <div class="nested-parent" id="nested-full-parent"><div class="nested-child" id="nested-full"></div></div>
-      <div class="nested-parent" id="nested-scaled-parent"><div class="nested-child" id="nested-scaled" data-xcss-server-corner-state="authored" data-xcss-server-corner-reason="authored-reason"></div></div>
-      <div class="nested-parent" id="nested-photo-parent"><div class="nested-child" id="nested-photo"></div></div>
-      <div class="nested-parent" id="nested-photo-all-parent"><div class="nested-child" id="nested-photo-all"></div></div>
-      <div class="nested-parent" id="nested-no-match-parent"><div class="nested-child" id="nested-no-match"></div></div>
-      <div class="nested-parent" id="nested-transformed-parent"><div class="nested-child" id="nested-transformed"></div></div>
-      <div class="test-surface" id="nested-no-parent"></div>
+      <div class="nested-parent" id="independent-parent"><div class="nested-child" id="independent-child"><button class="xcss-button" id="independent-row-button" aria-label="Independent row action">Go</button></div></div>
       <div class="xcss-application-boot" id="boot" hidden></div>
       <dialog class="xcss-dialog" id="dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Dialog</h2></dialog>
     </main>

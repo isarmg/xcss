@@ -5,6 +5,9 @@ test("native ESM uses relative assets, no React and the platform hard budget", (
   const config = createXcssNativeModuleViteConfig({ entry: "web/platform.js", outDir: "web/dist" });
   assert.equal(config.base, "./");
   assert.equal(config.build.sourcemap, false);
+  assert.equal(config.build.target, "esnext");
+  assert.equal(config.build.cssTarget, "esnext");
+  assert.deepEqual(config.build.modulePreload, { polyfill: false });
   assert.equal(config.build.assetsInlineLimit, 0);
   assert.equal(config.build.rollupOptions.preserveEntrySignatures, "strict");
   assert.equal(config.build.rollupOptions.output.format, "es");
@@ -23,5 +26,8 @@ test("asset sizes and source maps are hard release gates, not warnings", () => {
   assert.doesNotThrow(() => budget.generateBundle.call(context, {}, { "main.js": { type: "chunk", code: "hello" } }));
   for (const maxAssetBytes of [0, -1, 1.5, Infinity, 67108865]) assert.throws(() => createXcssReactViteConfig({ maxAssetBytes }));
   assert.equal(config.build.sourcemap, false);
+  assert.equal(config.build.target, "esnext");
+  assert.equal(config.build.cssTarget, "esnext");
+  assert.deepEqual(config.build.modulePreload, { polyfill: false });
   assert.deepEqual(config.resolve.dedupe, ["react", "react-dom"]);
 });

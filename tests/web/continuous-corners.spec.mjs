@@ -20,8 +20,8 @@ test("Mac mini surfaces preserve layout, zero regions, circles, pills and grid r
   const before = await page.locator("#panel").boundingBox();
   await page.evaluate(() => window.serverCorners.stop());
   expect(await page.locator("#panel").boundingBox()).toEqual(before);
-  await expect(page.locator("#panel")).toHaveCSS("border-top-left-radius", "20px");
-  await expect(page.locator("#control")).toHaveCSS("border-top-left-radius", "14px");
+  await expect(page.locator("#panel")).toHaveCSS("border-top-left-radius", "0px");
+  await expect(page.locator("#control")).toHaveCSS("border-top-left-radius", "0px");
   expect(await state(page, "panel")).toBeNull();
   await page.evaluate(() => { const old=window.serverCorners; window.serverCorners=window.startServerCorners(document); old.stop(); });
   await expect(page.locator("#panel")).toHaveAttribute("data-xcss-server-corner-state", "paint");
@@ -39,6 +39,47 @@ test("fixed host Mac mini mask clips scaled media while focus and outside shadow
   await expect(target).toHaveCSS("outline-style", "solid");
   await page.locator("#media").evaluate(el => { el.style.transform = "scale(1.1)"; }); await frame(page);
   expect(pngPixels(await page.locator("#media").screenshot(), [[1,1]])[0]).toEqual([255,255,255,255]);
+});
+
+test("menus and speech bubbles use the same Mac mini size at all four corners", async ({ page }, info) => {
+  await ready(page);
+  await page.evaluate(() => {
+    for (const id of ["uniform-menu", "uniform-bubble", "uniform-shadow"]) {
+      const node = document.createElement("div"); node.id = id;
+      node.style.cssText = "width:240px;height:120px;background:rgb(0,0,255);border-radius:0;--xcss-server-corner-extent:42px";
+      if (id === "uniform-shadow") node.style.boxShadow = "0 2px 4px -1px rgb(0 0 0 / .2)";
+      document.querySelector("main").append(node);
+    }
+  });
+  for (const id of ["uniform-menu", "uniform-bubble", "uniform-shadow"]) {
+    const node = page.locator(`#${id}`);
+    await expect(node).toHaveAttribute("data-xcss-server-corner-state", "paint");
+    expect(await node.getAttribute("data-xcss-server-corner-reason")).toBeNull();
+    await expect(node).toHaveCSS("border-radius", "0px");
+  }
+  for (const id of ["uniform-menu", "uniform-bubble"]) {
+    const pixels = await page.locator(`#${id}`).screenshot({ path: info.outputPath(`${id}.png`) });
+    expect(pngPixels(pixels, [[1,1], [238,1], [1,118], [238,118], [120,60]])).toEqual([
+      [255,255,255,255], [255,255,255,255], [255,255,255,255], [255,255,255,255], [0,0,255,255],
+    ]);
+  }
+});
+
+test("the actual shared account entry retains its circular shape under the server renderer", async ({ page }) => {
+  const session = { authenticated: true, user_id: "A".repeat(43), username: "admin", role: "admin", csrf_token: "A".repeat(43) };
+  await page.route("**/api/v1/**", route => route.fulfill({ status: 200, json: session }));
+  await page.goto("/");
+  const account = page.locator(".xcss-account-entry");
+  await expect(account).toBeVisible();
+  await page.evaluate(() => window.serverCorners = window.startServerCorners(document));
+  await expect(page.locator(".xcss-button").filter({ hasText: "Open modal" })).toHaveAttribute("data-xcss-server-corner-state", "paint");
+  expect(await account.getAttribute("data-xcss-server-corner-state")).toBeNull();
+  await expect(account).toHaveCSS("border-radius", "50%");
+  await expect(account).toHaveCSS("border-image-source", "none");
+  await account.click();
+  await expect(page.getByRole("region", { name: "Account settings", exact: true })).toBeVisible();
+  await expect(page.locator(".xcss-content-panel")).toHaveAttribute("data-xcss-server-corner-state", "paint");
+  expect(await account.getAttribute("data-xcss-server-corner-state")).toBeNull();
 });
 
 test("complex borders, backgrounds, shadows, backdrop blur and state changes survive", async ({ page }, info) => {
@@ -75,7 +116,7 @@ test("dynamic content, resizing, dialogs, RTL, forced colors and stop preserve a
   await expect(page.locator("#unequal")).toHaveAttribute("data-xcss-server-corner-state", "paint");
   await page.emulateMedia({ forcedColors:"active" });
   await expect(page.locator("#panel")).toHaveAttribute("data-xcss-server-corner-reason", "forced-colors");
-  await expect(page.locator("#panel")).toHaveCSS("border-top-left-radius", "20px");
+  await expect(page.locator("#panel")).toHaveCSS("border-top-left-radius", "0px");
   await page.emulateMedia({ forcedColors:"none" });
   await expect(page.locator("#panel")).toHaveAttribute("data-xcss-server-corner-state", "paint");
   await page.locator("#panel").evaluate(el => { el.style.backgroundColor="rgb(1, 2, 3)"; }); await frame(page);
@@ -191,132 +232,34 @@ test("Blob SVGs obey a restrictive image CSP and stop revokes controller-owned U
   expect(await page.evaluate(() => window.cornerUrls.size)).toBe(0);
 });
 
-const inspectNesting = (page, id, follow) => page.evaluate(async ({ id, follow }) => {
-  const child = document.getElementById(id), parent = child.parentElement;
-  const childBox = child.getBoundingClientRect(), parentBox = parent.getBoundingClientRect();
-  const css = getComputedStyle(child), parentCss = getComputedStyle(parent);
-  const parentGeometry = window.createServerCornerGeometry({ width:parentBox.width, height:parentBox.height, extent:parseFloat(parentCss.getPropertyValue("--xcss-server-corner-extent")), tolerance:.02 });
-  const expected = window.createNestedServerCornerGeometry({ width:childBox.width, height:childBox.height, extent:parseFloat(css.getPropertyValue("--xcss-server-corner-extent")), parent:parentGeometry, left:childBox.left-parentBox.left, top:childBox.top-parentBox.top, follow, tolerance:.02 });
-  const url = /url\(["']?(.*?)["']?\)/.exec(css.borderImageSource)[1];
+const inspectIndependent = (page, id) => page.evaluate(async id => {
+  const node = document.getElementById(id), css = getComputedStyle(node);
+  const box = node.getBoundingClientRect();
+  const expected = window.createServerCornerGeometry({ width:box.width, height:box.height, extent:parseFloat(css.getPropertyValue("--xcss-server-corner-extent")), tolerance:.02 });
+  const url = node.style.borderImageSource.match(/url\(["']?(.*?)["']?\)/)[1];
   const svg = new DOMParser().parseFromString(await (await fetch(url)).text(), "image/svg+xml");
-  const paths = [...svg.querySelectorAll("path[fill]")].filter(path => path.getAttribute("fill") !== "none" && !path.hasAttribute("filter"));
-  return { actualPath:paths.at(-1).getAttribute("d"), expectedPath:expected.path, corners:expected.corners.map(corner => ({ name:corner.name, extent:corner.extent, radius:corner.radius })), nested:expected.nested };
-}, { id, follow });
+  return { actualPath:svg.querySelector("clipPath#inside path").getAttribute("d"), expectedPath:expected.path, extents:expected.corners.map(corner => corner.extent) };
+}, id);
 
-test("explicit nested profiles follow all four child corners and real inset frames", async ({ page }, info) => {
+test("nested surfaces keep their own uniform corners when the parent and spacing change", async ({ page }, info) => {
   await ready(page);
-  const all = await inspectNesting(page,"nested-all","all");
-  expect(all.actualPath).toBe(all.expectedPath);
-  expect(all.nested.followed).toHaveLength(4);
-  expect(all.nested.aligned).toEqual(["top-left"]);
-  expect(all.corners.map(corner => corner.extent)).toEqual([52,52,52,52]);
-  const full = await inspectNesting(page,"nested-full","nearest");
-  expect(full.actualPath).toBe(full.expectedPath);
-  expect(full.nested.aligned).toHaveLength(4);
-  expect(full.corners.map(corner => corner.extent)).toEqual([52,52,52,52]);
-  const scaled = await inspectNesting(page,"nested-scaled","all");
-  expect(scaled.actualPath).toBe(scaled.expectedPath);
-  expect(scaled.nested.followed).toHaveLength(4);
-  expect(scaled.nested.aligned).toEqual([]);
-  expect(scaled.corners.map(corner => corner.extent)).toEqual([22,22,22,22]);
-  await expect(page.locator("#nested-scaled")).toHaveAttribute("data-xcss-server-corner-reason","nested-profile-scaled");
-  expect(await state(page,"nested-unselected")).toBeNull();
-  await expect(page.locator("#nested-independent")).toHaveCSS("--xcss-server-corner-nested","none");
-  await expect(page.locator("#nested-independent")).toHaveAttribute("data-xcss-server-corner-state","paint");
-  await expect(page.locator("#nested-row-button")).toHaveCSS("--xcss-server-corner-nested","none");
-  await expect(page.locator("#nested-row-button")).toHaveAttribute("data-xcss-server-corner-state","paint");
-  expect(await page.locator("#nested-row-button").getAttribute("data-xcss-server-corner-reason")).toBeNull();
-  await page.locator("#nested-all-parent").screenshot({ path:info.outputPath("macmini-four-corners.png") });
-  await page.locator("#nested-full-parent").screenshot({ path:info.outputPath("macmini-inset-frame.png") });
-});
-
-test("photo frames support all-four following and nearest physical corner alignment", async ({ page }, info) => {
-  await ready(page);
-  const photo = await inspectNesting(page,"nested-photo","nearest");
-  expect(photo.actualPath).toBe(photo.expectedPath);
-  expect(photo.nested.followed).toEqual(["top-right","top-left"]);
-  expect(photo.nested.aligned).toEqual(["top-right","top-left"]);
-  expect(photo.corners.map(corner => corner.extent)).toEqual([35,44,44,35]);
-  const all = await inspectNesting(page,"nested-photo-all","all");
-  expect(all.actualPath).toBe(all.expectedPath);
-  expect(all.nested.followed).toHaveLength(4);
-  expect(all.nested.aligned).toEqual(["top-right","top-left"]);
-  expect(all.corners.map(corner => corner.extent)).toEqual([35,35,35,35]);
-  await page.locator("#nested-photo-parent").screenshot({ path:info.outputPath("macmini-photo-nearest.png") });
-  await page.locator("#nested-photo-all-parent").screenshot({ path:info.outputPath("macmini-photo-all.png") });
-});
-
-test("nested profiles update after parent extent, dimensions, spacing and theme changes", async ({ page }) => {
-  await ready(page);
-  const original = await inspectNesting(page,"nested-all","all");
-  await page.locator("#nested-all-parent").evaluate(el => el.style.setProperty("--xcss-server-corner-extent","60px")); await frame(page);
-  const extent = await inspectNesting(page,"nested-all","all");
-  expect(extent.actualPath).toBe(extent.expectedPath); expect(extent.actualPath).not.toBe(original.actualPath);
-  expect(extent.corners.map(corner => corner.extent)).toEqual([42,42,42,42]);
-  await page.locator("#nested-all").evaluate(el => { el.style.left="20px"; el.style.top="20px"; }); await frame(page);
-  const spacing = await inspectNesting(page,"nested-all","all");
-  expect(spacing.actualPath).toBe(spacing.expectedPath); expect(spacing.actualPath).not.toBe(extent.actualPath);
-  await page.evaluate(() => { document.getElementById("nested-full-parent").style.width="340px"; document.getElementById("nested-full").style.width="304px"; }); await frame(page);
-  const resized = await inspectNesting(page,"nested-full","nearest");
-  expect(resized.actualPath).toBe(resized.expectedPath); expect(resized.nested.aligned).toHaveLength(4);
+  const original = await inspectIndependent(page, "independent-child");
+  expect(original.actualPath).toBe(original.expectedPath);
+  expect(original.extents).toEqual([22,22,22,22]);
+  await page.locator("#independent-parent").evaluate(el => { el.style.setProperty("--xcss-server-corner-extent", "50px"); el.style.width="340px"; });
+  await page.locator("#independent-child").evaluate(el => { el.style.left="30px"; el.style.top="24px"; });
+  await frame(page);
+  const moved = await inspectIndependent(page, "independent-child");
+  expect(moved.actualPath).toBe(original.actualPath);
+  expect(moved.actualPath).toBe(moved.expectedPath);
+  const button = await inspectIndependent(page, "independent-row-button");
+  expect(button.actualPath).toBe(button.expectedPath);
+  expect(button.extents).toEqual([10,10,10,10]);
+  await page.locator("#independent-parent").screenshot({ path:info.outputPath("independent-uniform-corners.png") });
   await page.evaluate(() => document.documentElement.dataset.theme="dark"); await frame(page);
-  expect((await inspectNesting(page,"nested-all","all")).actualPath).toBe(spacing.actualPath);
-  expect(pngPixels(await page.locator("#nested-all").screenshot(),[[80,64]])[0]).toEqual([20,30,40,255]);
-  await page.locator("#nested-row-button").evaluate(el => el.style.width="84px"); await frame(page);
-  await expect(page.locator("#nested-row-button")).toHaveCSS("--xcss-server-corner-nested","none");
-  expect(await page.locator("#nested-row-button").getAttribute("data-xcss-server-corner-reason")).toBeNull();
+  expect((await inspectIndependent(page, "independent-child")).actualPath).toBe(original.actualPath);
+  expect(pngPixels(await page.locator("#independent-child").screenshot(), [[120,100]])[0]).toEqual([20,30,40,255]);
   await page.evaluate(() => window.serverCorners.stop());
-  await expect(page.locator("#nested-all")).toHaveCSS("border-top-left-radius","12px");
-  await expect(page.locator("#nested-full-parent")).toHaveCSS("border-top-left-radius","20px");
-  expect(await state(page,"nested-all")).toBeNull();
-  await expect(page.locator("#nested-scaled")).toHaveAttribute("data-xcss-server-corner-state","authored");
-  await expect(page.locator("#nested-scaled")).toHaveAttribute("data-xcss-server-corner-reason","authored-reason");
-});
-
-test("unsupported nested coordinate systems and missing matches keep independent Mac mini corners", async ({ page }) => {
-  await ready(page);
-  await expect(page.locator("#nested-no-match")).toHaveAttribute("data-xcss-server-corner-reason","nested-no-aligned-corner");
-  await expect(page.locator("#nested-transformed")).toHaveAttribute("data-xcss-server-corner-reason","nested-transformed-coordinates");
-  await expect(page.locator("#nested-no-parent")).toHaveAttribute("data-xcss-server-corner-reason","nested-no-parent");
-  for (const id of ["nested-no-match","nested-transformed","nested-no-parent"]) await expect(page.locator(`#${id}`)).toHaveAttribute("data-xcss-server-corner-state","paint");
-  await page.locator("#nested-all-parent").evaluate(el => el.style.scale="1.05"); await frame(page);
-  await expect(page.locator("#nested-all")).toHaveAttribute("data-xcss-server-corner-reason","nested-transformed-coordinates");
-  await page.locator("#nested-all-parent").evaluate(el => el.style.removeProperty("scale")); await frame(page);
-  await page.locator("#nested-all").evaluate(el => { el.style.left="45px"; el.style.top="45px"; el.style.width="100px"; el.style.height="80px"; }); await frame(page);
-  await expect(page.locator("#nested-all")).toHaveAttribute("data-xcss-server-corner-state","paint");
-  await expect(page.locator("#nested-all")).toHaveAttribute("data-xcss-server-corner-reason","nested-offset-singularity");
-  await expect(page.locator("#nested-photo-all")).toHaveAttribute("data-xcss-server-corner-state","paint");
-  await page.locator("#nested-all").evaluate(el => { for (const name of ["left","top","width","height"]) el.style.removeProperty(name); }); await frame(page);
-  await page.locator("#nested-all-parent").evaluate(el => el.style.setProperty("mask-image","linear-gradient(white,white)")); await frame(page);
-  await expect(page.locator("#nested-all-parent")).toHaveAttribute("data-xcss-server-corner-reason","existing-mask");
-  await expect(page.locator("#nested-all")).toHaveAttribute("data-xcss-server-corner-reason","nested-parent-unavailable");
-  await page.locator("#nested-all-parent").evaluate(el => el.style.removeProperty("mask-image")); await frame(page);
-  const recovered = await inspectNesting(page,"nested-all","all");
-  expect(recovered.actualPath).toBe(recovered.expectedPath); expect(recovered.nested.followed).toHaveLength(4);
-});
-
-test("a parent hover translation retains the same following profile", async ({ page }) => {
-  await ready(page);
-  const before = await inspectNesting(page,"nested-photo-all","all");
-  await page.locator("#nested-photo-all-parent").evaluate(el => el.style.transform="translateY(-3px)"); await frame(page);
-  const after = await inspectNesting(page,"nested-photo-all","all");
-  expect(after.actualPath).toBe(before.actualPath);
-  expect(after.actualPath).toBe(after.expectedPath);
-  expect(after.nested.followed).toHaveLength(4);
-  expect(after.nested.aligned).toEqual(["top-right","top-left"]);
-  expect(await page.locator("#nested-photo-all").getAttribute("data-xcss-server-corner-reason")).toBeNull();
-});
-
-test("scrolling a nested host updates offsets in its visible CSS coordinate space", async ({ page }) => {
-  await ready(page);
-  await page.locator("#nested-all-parent").evaluate(el => {
-    el.style.overflow="auto";
-    const space=document.createElement("div"); space.style.cssText="width:400px;height:400px;pointer-events:none"; el.append(space);
-  }); await frame(page);
-  const before = await inspectNesting(page,"nested-all","all");
-  await page.locator("#nested-all-parent").evaluate(el => { el.scrollLeft=8; el.scrollTop=8; });
-  await expect.poll(async () => (await inspectNesting(page,"nested-all","all")).actualPath).not.toBe(before.actualPath);
-  const scrolled = await inspectNesting(page,"nested-all","all");
-  expect(scrolled.actualPath).toBe(scrolled.expectedPath);
-  expect(scrolled.corners.map(corner => corner.extent)).toEqual([60,60,60,60]);
+  await expect(page.locator("#independent-child")).toHaveCSS("border-radius", "0px");
+  expect(await state(page, "independent-child")).toBeNull();
 });

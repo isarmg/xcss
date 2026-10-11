@@ -14,6 +14,7 @@ export type AccountSettingsProps = {
 /** The account menu entry has no selected state, even while its page is open. */
 export function AccountSettings({ onNavigate, href = "#account" }: AccountSettingsProps = {}) {
   return <IconButton className="xcss-account-entry" aria-label={t("账号设置", "Account settings")}
+    data-xcss-server-corner="none"
     title={t("账号设置", "Account settings")} style={{ borderRadius: "50%", aspectRatio: "1" }}
     onClick={() => { if (onNavigate) onNavigate(); else window.location.hash = href; }}>
     <svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">

@@ -10,33 +10,23 @@ export const SERVER_CORNER_CONTROL_POINTS: readonly (readonly [number, number])[
   [1, 0.27187938563480885], [1, 0.41954530579923177], [1, 0.6366404315090468], [1, 1],
 ].map(point => Object.freeze(point as [number, number])));
 
-export interface ServerCornerOptions { width: number; height: number; extent: number; /** CSS px; default .05. */ tolerance?: number }
+export interface ServerCornerOptions {
+  width: number; height: number; extent: number;
+  /** CSS px; default .05. */ tolerance?: number;
+}
 export interface ServerCornerPoint { readonly x: number; readonly y: number; readonly heading: number; /** Original curve parameter; absent on independent edges. */ readonly parameter?: number }
-export type ServerCornerName = "top-right" | "bottom-right" | "bottom-left" | "top-left";
 export interface ServerCornerSource {
   /** Original physical extent and certified minimum curvature radius. */
   readonly extent: number; readonly radius: number;
-  /** Accumulated inward offset before applying the uniform physical scale. */
-  readonly offset: number; readonly scale: number;
+  /** Inward parallel offset used only for shadows and outlines. */
+  readonly offset: number;
 }
 export interface ServerCornerCurve { readonly extent: number; readonly radius: number; readonly points: readonly ServerCornerPoint[]; readonly source: ServerCornerSource }
-export interface NestedServerCornerOptions extends ServerCornerOptions {
-  parent: ServerCornerGeometry; /** Child border-box origin in untransformed parent coordinates. */ left: number; top: number;
-  matchTolerance?: number; /** Default all repeats the aligned source at every vertex. */ follow?: "all" | "nearest";
-}
-export interface ServerCornerNested {
-  readonly follow: "all" | "nearest"; readonly anchor?: ServerCornerName;
-  readonly followed: readonly ServerCornerName[];
-  /** Physical alignment within matchTolerance; empty after fit scaling. */
-  readonly aligned: readonly ServerCornerName[]; readonly linked: readonly ServerCornerName[];
-  readonly skipped: readonly { readonly corner: ServerCornerName; readonly reason: string }[];
-  readonly alignmentError: number; readonly profileScale: number; readonly reason?: string;
-}
 export interface ServerCornerGeometry {
   readonly width: number; readonly height: number; readonly extent: number; readonly radius: number;
   readonly path: string; readonly points: readonly ServerCornerPoint[];
   /** Clockwise: top-right, bottom-right, bottom-left, top-left. */
-  readonly corners: readonly ServerCornerCurve[]; readonly canonical: boolean; readonly nested?: ServerCornerNested;
+  readonly corners: readonly ServerCornerCurve[]; readonly canonical: boolean;
   /** Interpolation, arithmetic and SVG serialization allowance, in CSS px. */ readonly errorBound: number;
 }
 
@@ -106,9 +96,7 @@ export const SERVER_CORNER_PROFILE_BOUNDS = certifyProfile();
 const fmt = (value: number) => Number(value.toFixed(6)).toString();
 const pair = (point: Vector) => `${fmt(point.x)} ${fmt(point.y)}`;
 const freezePoints = (points: ServerCornerPoint[]) => Object.freeze(points.map(point => Object.freeze(point)));
-const cornerNames: readonly ServerCornerName[] = ["top-right", "bottom-right", "bottom-left", "top-left"];
 const geometryCache = new Map<string, ServerCornerGeometry>();
-const nestedCache = new WeakMap<ServerCornerGeometry, Map<string, ServerCornerGeometry>>();
 const sampleCache = new Map<string, { points: readonly ServerCornerPoint[]; bound: number }>();
 const pathCache = new WeakMap<ServerCornerGeometry, Map<number, string>>();
 const geometryTolerance = new WeakMap<ServerCornerGeometry, number>();
@@ -138,16 +126,16 @@ function sampleProfile(offset: number, budget: number) {
   visit(derivatives[1], derivatives[2], derivatives[3], 0, 1, 0);
   return cacheSet(sampleCache, key, Object.freeze({ points: freezePoints(points), bound }));
 }
-function sourceFor(extent: number): ServerCornerSource { return Object.freeze({ extent, radius: extent * SERVER_CORNER_PROFILE_BOUNDS.minimumRadius, offset: 0, scale: 1 }); }
-function regular(source: ServerCornerSource) { return source.extent > 0 && source.scale > 0 && source.offset < source.radius - Math.max(source.extent * Number.EPSILON * 16, source.radius * 1e-10); }
+function sourceFor(extent: number): ServerCornerSource { return Object.freeze({ extent, radius: extent * SERVER_CORNER_PROFILE_BOUNDS.minimumRadius, offset: 0 }); }
+function regular(source: ServerCornerSource) { return source.extent > 0 && source.offset < source.radius - Math.max(source.extent * Number.EPSILON * 16, source.radius * 1e-10); }
 function localCurve(source: ServerCornerSource, tolerance: number) {
-  const extent = (source.extent - source.offset) * source.scale;
+  const extent = source.extent - source.offset;
   if (source.extent === 0) return { extent: 0, radius: 0, points: [{ x: 0, y: 0, heading: 0 }, { x: 0, y: 0, heading: Math.PI / 2 }], bound: 0 };
   if (!regular(source)) throw new RangeError("Corner offset is not certified regular");
-  const size = source.extent * source.scale, allowance = 2e-6 + size * 1e-10;
+  const size = source.extent, allowance = 2e-6 + size * 1e-10;
   if (allowance >= tolerance / 2) throw new RangeError("Tolerance is smaller than arithmetic/serialization allowance");
   const sampled = sampleProfile(source.offset / source.extent, tolerance / (2 * size));
-  return { extent, radius: (source.radius - source.offset) * source.scale, points: sampled.points.map(q => ({ ...q, x: q.x * size, y: q.y * size })), bound: sampled.bound * size + allowance };
+  return { extent, radius: source.radius - source.offset, points: sampled.points.map(q => ({ ...q, x: q.x * size, y: q.y * size })), bound: sampled.bound * size + allowance };
 }
 function transform(q: ServerCornerPoint, index: number, width: number, height: number, extent: number): ServerCornerPoint {
   if (index === 0) return { ...q, x: width - extent + q.x, y: q.y };
@@ -155,10 +143,10 @@ function transform(q: ServerCornerPoint, index: number, width: number, height: n
   if (index === 2) return { ...q, x: extent - q.x, y: height - q.y, heading: q.heading + Math.PI };
   return { ...q, x: q.y, y: extent - q.x, heading: q.heading + 3 * Math.PI / 2 };
 }
-function assemble(width: number, height: number, sources: readonly ServerCornerSource[], tolerance: number, canonical: boolean, nested?: ServerCornerNested): ServerCornerGeometry {
-  let errorBound = 0;
-  const corners = sources.map((source, index) => {
-    const local = localCurve(source, tolerance); errorBound = Math.max(errorBound, local.bound);
+function assemble(width: number, height: number, source: ServerCornerSource, tolerance: number, canonical: boolean): ServerCornerGeometry {
+  const local = localCurve(source, tolerance);
+  let errorBound = local.bound;
+  const corners = Array.from({ length: 4 }, (_, index) => {
     return Object.freeze({ extent: local.extent, radius: local.radius, source, points: freezePoints(local.points.map(q => transform(q, index, width, height, local.extent))) });
   });
   // Translation to a large border-box origin also has floating-point error;
@@ -167,88 +155,33 @@ function assemble(width: number, height: number, sources: readonly ServerCornerS
   if (errorBound > tolerance) throw new RangeError("Corner cannot meet the requested coordinate budget");
   const points = freezePoints([{ x: corners[3].extent, y: 0, heading: 0 }, ...corners.flatMap(corner => [...corner.points])]);
   const path = points.map((q, i) => `${i ? "L" : "M"}${pair(q)}`).join("") + "Z";
-  const result = Object.freeze({ width, height, extent: Math.max(...corners.map(c => c.extent)), radius: Math.min(...corners.map(c => c.radius)), path, points,
-    corners: Object.freeze(corners), canonical, ...(nested ? { nested } : {}), errorBound });
+  const result = Object.freeze({ width, height, extent: local.extent, radius: local.radius, path, points,
+    corners: Object.freeze(corners), canonical, errorBound });
   geometryTolerance.set(result, tolerance); return result;
 }
-/** Equal physical corner boxes; clamping to half the short side prevents
- * overlap without anisotropically stretching the original square outline. */
+/** Four identical physical corner boxes; clamping to half the short side
+ * prevents overlap without anisotropically stretching the source profile. */
 export function createServerCornerGeometry(options: ServerCornerOptions): ServerCornerGeometry {
   const width = finite(options.width, "width"), height = finite(options.height, "height"), requested = finite(options.extent, "extent"), tolerance = finite(options.tolerance ?? .05, "tolerance");
   if (width <= 0 || height <= 0 || requested < 0 || tolerance <= 0) throw new RangeError("Invalid corner dimensions or tolerance");
-  const extent = Math.min(requested, width / 2, height / 2), key = [width, height, extent, tolerance].join(","), cached = cacheGet(geometryCache, key);
+  const extent = Math.min(requested, width / 2, height / 2);
+  const key = [width, height, extent, tolerance].join(","), cached = cacheGet(geometryCache, key);
   if (cached) return cached;
-  const source = sourceFor(extent); return cacheSet(geometryCache, key, assemble(width, height, [source, source, source, source], tolerance, true));
-}
-function freezeNested(nested: ServerCornerNested): ServerCornerNested {
-  return Object.freeze({ ...nested, followed: Object.freeze([...nested.followed]), aligned: Object.freeze([...nested.aligned]), linked: Object.freeze([...nested.linked]), skipped: Object.freeze(nested.skipped.map(item => Object.freeze({ ...item }))) });
-}
-const sameSource = (a: ServerCornerSource, b: ServerCornerSource) => ["extent", "offset", "scale"].every(key => Math.abs(a[key as keyof ServerCornerSource] - b[key as keyof ServerCornerSource]) <= 1e-8);
-/** Regular inward parallel curves preserve G3: κ_inner=κ/(1-dκ),
- * κ_s,inner=κ_s/(1-dκ)^3. all follows an actually aligned source at every
- * vertex; copied opposite corners are not falsely labelled aligned.
- * Uniform fit scaling preserves shape/G3 but loses actual equal distance.
- * Source offset and scale survive repeated nesting. */
-export function createNestedServerCornerGeometry(options: NestedServerCornerOptions): ServerCornerGeometry {
-  const base = createServerCornerGeometry(options), parent = options.parent, left = finite(options.left, "left"), top = finite(options.top, "top");
-  const match = finite(options.matchTolerance ?? .25, "matchTolerance"), follow = options.follow ?? "all", tolerance = options.tolerance ?? .05;
-  if (match < 0 || !["all", "nearest"].includes(follow)) throw new RangeError("Invalid nested matching options");
-  const key = [base.width, base.height, base.extent, tolerance, left, top, match, follow].join(",");
-  let cache = nestedCache.get(parent); if (!cache) { cache = new Map(); nestedCache.set(parent, cache); }
-  const cached = cacheGet(cache, key); if (cached) return cached;
-  const right = parent.width - left - base.width, bottom = parent.height - top - base.height, pairs = [[right, top], [right, bottom], [left, bottom], [left, top]];
-  const reasons = ["", "", "", ""], distances = pairs.map(([a, b]) => (a + b) / 2);
-  const candidates = parent.corners.map((corner, i) => {
-    const [a, b] = pairs[i], distance = distances[i], source = Object.freeze({ ...corner.source, offset: corner.source.offset + distance / corner.source.scale });
-    reasons[i] = a < -1e-9 || b < -1e-9 ? "outside-parent" : Math.abs(a - b) > match ? "unaligned-insets" : corner.extent === 0 ? "flat-region" : !regular(source) ? "offset-singularity" : "";
-    return reasons[i] ? undefined : source;
-  });
-  let sources = base.corners.map(c => c.source), followed: ServerCornerName[] = [], aligned: ServerCornerName[] = [], anchor: ServerCornerName | undefined;
-  let alignmentError = 0, profileScale = 1, reason: string | undefined;
-  if (follow === "all") {
-    // Stable ties prefer TL, then clockwise; use the nearest valid pair.
-    const order = [3, 0, 1, 2].filter(i => candidates[i]).sort((a, b) => distances[a] - distances[b]);
-    if (order.length) {
-      const index = order[0], selected = candidates[index]!; anchor = cornerNames[index];
-      const extent = (selected.extent - selected.offset) * selected.scale;
-      profileScale = Math.min(1, base.width / (2 * extent), base.height / (2 * extent));
-      const fitted = Object.freeze({ ...selected, scale: selected.scale * profileScale }); sources = [fitted, fitted, fitted, fitted]; followed = [...cornerNames];
-      alignmentError = Math.abs(pairs[index][0] - pairs[index][1]) / 2;
-      if (profileScale < 1 - 1e-12) reason = "profile-scaled";
-      else {
-        aligned = cornerNames.filter((_, i) => candidates[i] && sameSource(candidates[i]!, selected));
-        alignmentError = Math.max(alignmentError, ...aligned.map(name => { const i = cornerNames.indexOf(name); return Math.abs(pairs[i][0] - pairs[i][1]) / 2; }));
-      }
-    } else reason = reasons.includes("offset-singularity") ? "offset-singularity" : reasons.includes("flat-region") ? "flat-region" : reasons.every(r => r === "outside-parent") ? "outside-parent" : "no-aligned-corner";
-  } else {
-    const linked = candidates.map(Boolean), extents = candidates.map((source, i) => source ? (source.extent - source.offset) * source.scale : base.corners[i].extent);
-    const edges = [[3, 0, base.width], [0, 1, base.height], [1, 2, base.width], [2, 3, base.height]];
-    for (let i = 0; i < 4; i++) if (linked[i] && extents[i] > Math.min(base.width, base.height) + 1e-8) { linked[i] = false; reasons[i] = "overlap"; extents[i] = base.extent; }
-    for (const [a, b, limit] of edges) if (linked[a] && linked[b] && extents[a] + extents[b] > limit + 1e-8) for (const i of [a, b]) { linked[i] = false; reasons[i] = "overlap"; extents[i] = base.extent; }
-    for (const [a, b, limit] of edges) {
-      if (extents[a] + extents[b] <= limit) continue;
-      if (linked[a]) extents[b] = Math.max(0, limit - extents[a]); else if (linked[b]) extents[a] = Math.max(0, limit - extents[b]);
-      else { const scale = limit / (extents[a] + extents[b]); extents[a] *= scale; extents[b] *= scale; }
-    }
-    sources = extents.map((extent, i) => linked[i] ? candidates[i]! : sourceFor(extent)); followed = aligned = cornerNames.filter((_, i) => linked[i]);
-    alignmentError = Math.max(0, ...linked.map((yes, i) => yes ? Math.abs(pairs[i][0] - pairs[i][1]) / 2 : 0));
-    if (!followed.length) reason = reasons.includes("offset-singularity") ? "offset-singularity" : reasons.includes("overlap") ? "overlap" : "no-aligned-corner";
-  }
-  const nested = freezeNested({ follow, ...(anchor ? { anchor } : {}), followed, aligned, linked: aligned,
-    skipped: cornerNames.flatMap((corner, i) => followed.includes(corner) ? [] : [{ corner, reason: reasons[i] || "independent-role" }]), alignmentError, profileScale, ...(reason ? { reason } : {}) });
-  return cacheSet(cache, key, assemble(base.width, base.height, sources, tolerance, false, nested));
+  return cacheSet(geometryCache, key, assemble(width, height, sourceFor(extent), tolerance, true));
 }
 /** Outward shadow/outline spread. Resample the analytic parallel profile at
  * its own derivative bound; shifting old coarse chords would not retain the
  * original error budget. No affine stretching of the whole silhouette. */
 export function offsetServerCornerPath(geometry: ServerCornerGeometry, offset: number): string {
   finite(offset, "offset"); if (offset === 0) return geometry.path;
-  if (offset <= -geometry.radius) throw new RangeError("Inset exceeds certified minimum curvature radius");
+  if (geometry.width + offset * 2 <= 0 || geometry.height + offset * 2 <= 0) throw new RangeError("Inset leaves no positive shadow dimensions");
+  if (offset < 0 && geometry.radius > 0 && offset <= -geometry.radius) throw new RangeError("Inset exceeds certified minimum curvature radius");
   let cache = pathCache.get(geometry); if (!cache) { cache = new Map(); pathCache.set(geometry, cache); }
   const cached = cacheGet(cache, offset); if (cached) return cached;
   const tolerance = geometryTolerance.get(geometry) ?? .05;
+  const source = geometry.corners[0].source;
   const expanded = assemble(geometry.width + offset * 2, geometry.height + offset * 2,
-    geometry.corners.map(c => c.source.extent === 0 ? sourceFor(0) : Object.freeze({ ...c.source, offset: c.source.offset - offset / c.source.scale })), tolerance, false);
+    source.extent === 0 ? sourceFor(0) : Object.freeze({ ...source, offset: source.offset - offset }), tolerance, false);
   const points = expanded.points.map(q => ({ x: q.x - offset, y: q.y - offset }));
   return cacheSet(cache, offset, points.map((q, i) => `${i ? "L" : "M"}${pair(q)}`).join("") + "Z", 16);
 }

@@ -12,6 +12,23 @@
 标题与产品标识仍向辅助技术提供；错误行可以滚动，完整请求 ID 不会被删除。
 跟随现有 `data-theme="light|dark"` 和系统主题；保留强制色彩和键盘焦点。
 
+## 系统、浏览器与圆角策略
+
+仅支持当前最新稳定版浏览器和原生系统系列。升级时同时更新构建与 CI，
+不增加旧浏览器探测、polyfill 或旧圆角兼容层。Web 构建采用 `esnext`，
+关闭 module-preload polyfill。
+
+服务端入口显式调用 `startServerCorners(document)`，使用 Mac mini 轮廓。
+普通控件、面板、提示和弹窗分别使用 27、42、48、54px 的角边界范围；
+这些值不是圆弧半径。圆形和胶囊保持自身形状；明确圆形的账号入口使用
+`data-xcss-server-corner="none"`。系统强制色彩模式使用系统颜色与清晰边界，
+不恢复旧圆角。控制器停止或元素暂不可见时，同样没有旧圆角替代层。
+
+每个圆角矩形只使用一个 `--xcss-server-corner-extent`，四角大小与曲线完全一致。
+下拉菜单和选择框的顶部、底部均保留完整圆角。
+嵌套容器的视觉协调仅是设计原则：通过组件自身的统一尺寸令牌选择合适的圆角，
+控制器不判断是否适合跟随，不计算父子轮廓，也不提供逐角覆盖或跟随 API。
+
 业务可以使用 `.xcss-content-grid`、`.xcss-content-card`、
 `.xcss-content-card__inner`、`.xcss-content-row` 构成六行 3:2 卡片。
 长表单、详情、表格使用可伸展的 `.xcss-content-panel`，不要强制塞进固定比例卡片。

@@ -9,6 +9,8 @@ import "../../../web/design-tokens/reset.css";
 import "../../../web/design-tokens/accessibility.css";
 import "../../../web/web-fonts/fonts.css";
 import "../../../web/admin-ui/styles.css";
+import { startServerCorners } from "../../../dist/admin-ui/server-corners.js";
+window.startServerCorners = startServerCorners;
 
 function WorkspaceFixture() {
   const [creating,setCreating] = useState(false); const [revision,setRevision] = useState(0);

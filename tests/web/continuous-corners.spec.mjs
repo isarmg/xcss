@@ -206,6 +206,39 @@ test("all transitions keep native dimension and opacity animation without repain
   await expect(page.locator("#state-control")).toHaveCSS("transition-property","all");
 });
 
+test("removing an extent-transition subtree stops the renderer frame loop", async ({ page }) => {
+  await ready(page);
+  const report = await page.evaluate(async () => {
+    const group = document.createElement("section");
+    const nodes = Array.from({ length: 2 }, () => {
+      const node = document.createElement("div");
+      node.style.cssText = "width:120px;height:80px;background:blue;--xcss-server-corner-extent:10px;transition:--xcss-server-corner-extent 10s linear";
+      group.append(node); return node;
+    });
+    document.body.append(group);
+    while (!nodes.every(node => node.hasAttribute("data-xcss-server-corner-state"))) await new Promise(requestAnimationFrame);
+    const started = nodes.map(node => new Promise(resolve => node.addEventListener("transitionrun", event => {
+      if (event.propertyName === "--xcss-server-corner-extent") resolve();
+    }, { once: true })));
+    nodes.forEach(node => node.style.setProperty("--xcss-server-corner-extent", "20px"));
+    await Promise.all(started);
+    group.remove();
+    let writes = 0, previous = 0, quiet = 0;
+    const observer = new MutationObserver(records => { writes += records.length; });
+    observer.observe(document, { subtree: true, attributes: true, childList: true });
+    for (let frame = 0; frame < 40 && quiet < 3; frame++) {
+      await new Promise(requestAnimationFrame);
+      quiet = writes === previous ? quiet + 1 : 0; previous = writes;
+    }
+    const settled = quiet === 3;
+    writes = 0;
+    for (let frame = 0; frame < 8; frame++) await new Promise(requestAnimationFrame);
+    observer.disconnect();
+    return { settled, idleWrites: writes, removedStates: nodes.map(node => node.getAttribute("data-xcss-server-corner-state")) };
+  });
+  expect(report).toEqual({ settled: true, idleWrites: 0, removedStates: [null, null] });
+});
+
 test("Blob SVGs obey a restrictive image CSP and stop revokes controller-owned URLs", async ({ page }, info) => {
   await page.addInitScript(() => {
     window.violations=[]; window.cornerUrls=new Set();

@@ -136,7 +136,10 @@ export function startServerCorners(document: Document): ServerCornersController 
     if (!url) { url = view.URL.createObjectURL(new view.Blob([source], { type: "image/svg+xml" })); imageUrls.set(source, url); }
     return `url("${url}")`;
   };
-  let frame = 0, stopped = false, animating = 0;
+  let frame = 0, stopped = false;
+  // Count per target because its element and pseudo-elements can transition
+  // concurrently. Detached targets cannot deliver cancellation to document.
+  const activeExtentTransitions = new Map<Element, number>();
   const state = (element: HTMLElement) => {
     let value = records.get(element);
     if (!value) { value = { saved: new Map(), pending: new Map(), transitionDirty: true, originalState: element.getAttribute("data-xcss-server-corner-state"), originalReason: element.getAttribute("data-xcss-server-corner-reason") }; records.set(element, value); }
@@ -348,7 +351,10 @@ export function startServerCorners(document: Document): ServerCornersController 
     for (const source of inactive.slice(0, Math.max(0, inactive.length - 96))) {
       view.URL.revokeObjectURL(imageUrls.get(source)!); imageUrls.delete(source);
     }
-    observe(); if (animating > 0) schedule();
+    for (const target of activeExtentTransitions.keys()) {
+      if (!target.isConnected || target.ownerDocument !== document) activeExtentTransitions.delete(target);
+    }
+    observe(); if (activeExtentTransitions.size > 0) schedule();
   }
   function schedule() { if (!stopped && !frame) frame = view.requestAnimationFrame(update); }
   const events = ["pointerover", "pointerout", "pointerdown", "pointerup", "focusin", "focusout", "keydown", "keyup", "change", "input", "load", "DOMContentLoaded", "scroll"];
@@ -361,12 +367,18 @@ export function startServerCorners(document: Document): ServerCornersController 
     // Size changes are already observed. Only an animated opt-in extent needs
     // a frame loop; spinners and self-written paint properties never start one.
     if (event instanceof view.TransitionEvent && ownedPaintProperty(event.propertyName) && records.has(event.target as HTMLElement)) return;
-    if (event instanceof view.TransitionEvent && event.propertyName === "--xcss-server-corner-extent") animating++;
+    if (event instanceof view.TransitionEvent && event.propertyName === "--xcss-server-corner-extent" && event.target instanceof view.Element) {
+      activeExtentTransitions.set(event.target, (activeExtentTransitions.get(event.target) ?? 0) + 1);
+    }
     schedule();
   };
   const animationEnd = (event: Event) => {
     if (event instanceof view.TransitionEvent && ownedPaintProperty(event.propertyName) && records.has(event.target as HTMLElement)) return;
-    if (event instanceof view.TransitionEvent && event.propertyName === "--xcss-server-corner-extent") animating = Math.max(0, animating - 1);
+    if (event instanceof view.TransitionEvent && event.propertyName === "--xcss-server-corner-extent" && event.target instanceof view.Element) {
+      const count = activeExtentTransitions.get(event.target) ?? 0;
+      if (count > 1) activeExtentTransitions.set(event.target, count - 1);
+      else activeExtentTransitions.delete(event.target);
+    }
     schedule();
   };
   for (const name of ["transitionrun", "animationstart"]) document.addEventListener(name, animationStart, true);
@@ -379,6 +391,7 @@ export function startServerCorners(document: Document): ServerCornersController 
     stop() {
       if (stopped) return;
       stopped = true; if (frame) view.cancelAnimationFrame(frame);
+      activeExtentTransitions.clear();
       controllers.delete(document);
       observer.disconnect(); resize.disconnect();
       for (const event of events) document.removeEventListener(event, interaction, true);

@@ -34,9 +34,6 @@ function expectedPrimitiveVariables() {
   for (const [name, value] of Object.entries(tokens.space)) {
     variables[`--xcss-space-${name}`] = value;
   }
-  for (const [name, value] of Object.entries(tokens.radius)) {
-    variables[`--xcss-radius-${name}`] = value;
-  }
   for (const [name, value] of Object.entries(tokens.typography)) {
     const cssName = name.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
     variables[`--xcss-${cssName}`] = value;

@@ -16,9 +16,6 @@
   --xcss-space-6: 24px;
   --xcss-space-8: 32px;
   --xcss-content-spacing: var(--xcss-space-4);
-  --xcss-radius-sm: 6px;
-  --xcss-radius-md: 8px;
-  --xcss-radius-lg: 12px;
   --xcss-action-primary: var(--xcss-blue-600);
   --xcss-text-link: var(--xcss-blue-600);
   --xcss-bg-page: var(--xcss-gray-50);

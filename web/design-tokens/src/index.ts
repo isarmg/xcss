@@ -15,11 +15,6 @@ export const tokens = {
     6: "24px",
     8: "32px",
   },
-  radius: {
-    sm: "6px",
-    md: "8px",
-    lg: "12px",
-  },
   typography: {
     fontUi: '"Sarmg Maple", ui-monospace, monospace',
     fontMono: '"Sarmg Maple", ui-monospace, monospace',

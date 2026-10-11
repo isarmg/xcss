@@ -302,7 +302,7 @@
 
 | ID | 当前功能/特性 | 实现/锚点 | 最低验证/边界 |
 | --- | --- | --- | --- |
-| FND-300 | TS导出小型颜色/间距/圆角原语 | `src/index.ts` | declaration/export/test |
+| FND-300 | TS导出小型颜色/间距/字体原语 | `src/index.ts` | declaration/export/test |
 | FND-301 | light语义令牌与原语对齐 | `semanticTokens.light`、`tokens.css` | source/CSS effective value测试 |
 | FND-302 | dark只覆盖真正变化的语义值 | `semanticTokens.dark`、`tokens.dark.css` | light+override effective测试 |
 | FND-303 | CSS变量统一`--xcss-*` 命名空间 | 令牌 CSS | selector/property扫描 |

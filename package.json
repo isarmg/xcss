@@ -1,6 +1,6 @@
 {
   "name": "@xcss/web",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": false,
   "description": "Linux AMD64 xcss server administrator Web support and build inputs",
   "license": "Apache-2.0",
@@ -128,6 +128,10 @@
       "import": "./dist/admin-ui/index.js"
     },
     "./admin-ui/styles.css": "./dist/admin-ui/styles.css",
+    "./admin-ui/server-corners": {
+      "types": "./dist/admin-ui/server-corners.d.ts",
+      "import": "./dist/admin-ui/server-corners.js"
+    },
     "./admin-ui/content-blocks.css": "./dist/admin-ui/content-blocks.css",
     "./admin-ui/date-range": {
       "types": "./dist/admin-ui/DateRangeField.d.ts",

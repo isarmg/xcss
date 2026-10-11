@@ -54,3 +54,25 @@
 @media(prefers-reduced-motion:reduce) { *,*::before,*::after { scroll-behavior:auto!important;transition-duration:.001ms!important;animation-duration:.001ms!important; } }
 
 .xcss-auth-content { display: grid; justify-items: center; gap: 1rem; width: min(28rem,100%); }
+
+/* Explicit server Mac mini opt-in using the local degree-seven contour fit.
+ * These are corner bounding extents, not circular radii or Apple API values.
+ * The runtime clamps them to half the short side. Authored radii remain
+ * available before startup and whenever the runtime must use a fallback. */
+@property --xcss-server-corner-extent { syntax: "<length-percentage>"; inherits: false; initial-value: 0px; }
+@property --xcss-server-corner-mode { syntax: "*"; inherits: false; initial-value: paint; }
+@property --xcss-server-corner-nested { syntax: "none | all | nearest"; inherits: false; initial-value: none; }
+:root {
+  --xcss-server-corner-control: 27px;
+  --xcss-server-corner-panel: 42px;
+  --xcss-server-corner-notification: 48px;
+  --xcss-server-corner-dialog: 54px;
+  --xcss-server-corner-photo: 31.0568993271%;
+  /* A 216x144 six-row card has its first text box ~2.4px below the edge.
+   * Keep its existing safe horizontal inset while changing only the contour,
+   * without changing the card's size or its row positions. */
+  --xcss-server-corner-text-inset: 26px;
+}
+.xcss-button, .xcss-input, .xcss-navigation a { --xcss-server-corner-extent: var(--xcss-server-corner-control); }
+.xcss-error, .xcss-toast, .xcss-auth-card { --xcss-server-corner-extent: var(--xcss-server-corner-notification); }
+.xcss-dialog { --xcss-server-corner-extent: var(--xcss-server-corner-dialog); }

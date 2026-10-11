@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en" data-xcss-appearance="content-blocks">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Continuous corner acceptance</title>
+    <script type="module">
+      import "../../../web/design-tokens/tokens.css";
+      import "../../../web/design-tokens/tokens.dark.css";
+      import "../../../web/design-tokens/reset.css";
+      import "../../../web/design-tokens/accessibility.css";
+      import "../../../web/admin-ui/styles.css";
+      import { startServerCorners, createServerCornerGeometry, createNestedServerCornerGeometry } from "../../../web/admin-ui/src/server-corners.ts";
+      window.startServerCorners = startServerCorners;
+      window.createServerCornerGeometry = createServerCornerGeometry;
+      window.createNestedServerCornerGeometry = createNestedServerCornerGeometry;
+      window.serverCorners = startServerCorners(document);
+    </script>
+    <style>
+      body { padding: 24px; }
+      .corner-gallery { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; max-width: 600px; }
+      .corner-preview { width: 300px; max-width: 100%; }
+      .corner-fill { position: absolute; inset: 0; background: #2563eb; }
+      .corner-circle { width: 40px; height: 40px; border-radius: 50%; background: #2563eb; }
+      .corner-controls { display: flex; flex-wrap: wrap; gap: 12px; }
+      #boot { display: none; }
+      .test-surface { --xcss-server-corner-extent:36px; width:160px; height:100px; border-radius:14px; background:white; }
+      #clipped { position:relative; overflow:hidden; border:3px solid blue; outline:3px solid #facc15; outline-offset:5px; box-shadow:0 0 8px black; }
+      #clipped > div { position:absolute; inset:0; background:rgb(0,180,0); transform:scale(1.4); }
+      #media { --xcss-server-corner-extent:31.0568993271%; --xcss-server-corner-mode:clip; width:100px; height:100px; object-fit:cover; }
+      #gradient { border:2px solid blue; background:linear-gradient(90deg,red,transparent),radial-gradient(circle,yellow,green); background-size:auto,20px 20px; }
+      #blur { background:rgba(255,255,255,.5); backdrop-filter:blur(4px); }
+      #unequal { border:1px solid red; border-left:5px solid blue; background:yellow; }
+      #dashed { border:2px dashed blue; }
+      #spread { box-shadow:0 4px 12px -6px black,0 1px 5px 3px rgba(0,0,255,.3); }
+      #state-control { width:120px;height:40px;background:white;padding:0;border:0; }
+      #state-control:hover { background:red; }
+      #state-control:disabled { background:gray; }
+      #state-control.animated { transition:width .1s,background-color .1s; }
+      #dark-surface { width:120px;height:60px;background:white; }
+      html[data-theme=dark] #dark-surface { background:rgb(20,30,40); }
+      #grid-row { display:grid; --xcss-server-corner-extent:12px; background:yellow; }
+      .nested-parent { --xcss-server-corner-extent:70px; position:relative; width:300px; height:210px; background:#dbeafe; border-radius:20px; }
+      .nested-child { --xcss-server-corner-extent:22px; position:absolute; left:18px; top:18px; background:#2563eb; border-radius:12px; }
+      #nested-all { --xcss-server-corner-nested:all; width:160px; height:128px; }
+      #nested-full { --xcss-server-corner-nested:nearest; width:264px; height:174px; }
+      #nested-scaled { --xcss-server-corner-nested:all; width:60px; height:44px; }
+      #nested-photo-parent, #nested-photo-all-parent { --xcss-server-corner-extent:48px; height:244px; }
+      #nested-photo, #nested-photo-all { left:13px; top:13px; width:274px; height:144px; --xcss-server-corner-extent:44px; }
+      #nested-photo { --xcss-server-corner-nested:nearest; }
+      #nested-photo-all { --xcss-server-corner-nested:all; }
+      #nested-unselected { position:absolute; left:100px; top:170px; width:30px; height:20px; background:red; border-radius:8px; }
+      #nested-independent { --xcss-server-corner-extent:12px; position:absolute; left:180px; top:160px; width:90px; height:40px; background:#ef4444; border-radius:8px; }
+      #nested-row-button { --xcss-server-corner-extent:10px; position:absolute; left:50px; top:100px; width:60px; height:24px; border:0; padding:0; background:#ef4444; }
+      #nested-no-match { --xcss-server-corner-nested:nearest; left:17px; top:30px; width:100px; height:80px; }
+      #nested-transformed { --xcss-server-corner-nested:all; width:100px; height:80px; transform:scale(.9); }
+      #nested-no-parent { --xcss-server-corner-nested:all; }
+      html[data-theme=dark] #nested-all { background:rgb(20,30,40); }
+    </style>
+  </head>
+  <body data-xcss-scope>
+    <main class="corner-gallery">
+      <section class="xcss-content-panel" id="panel">
+        <h1>Continuous corners</h1>
+        <span id="unselected">Unselected child</span>
+        <div class="corner-controls">
+          <button class="xcss-button" id="control">Action</button>
+          <input class="xcss-input" id="input" aria-label="Name" value="Name">
+          <select class="xcss-input" id="select" aria-label="Choice"><option>Option</option></select>
+          <textarea class="xcss-input" id="textarea" aria-label="Notes">Notes</textarea>
+          <input class="xcss-date-range-number" id="date" aria-label="Year" value="2026" size="4">
+        </div>
+        <div class="xcss-table-scroll" id="nested-table">Nested square region</div>
+      </section>
+      <div class="xcss-toast" id="notification">Notification content</div>
+      <div class="xcss-content-card corner-preview" id="card"><div class="corner-fill" id="fill"></div></div>
+      <div class="xcss-content-card corner-preview" id="text-card"><div class="xcss-content-card__inner">
+        <div class="xcss-content-row"><span id="first-row">First row</span><span>Value</span></div>
+        <div class="xcss-content-row"><span>Second</span><span>Value</span></div>
+        <div class="xcss-content-row"><span>Third</span><span>Value</span></div>
+        <div class="xcss-content-row"><span>Fourth</span><span>Value</span></div>
+        <div class="xcss-content-row"><span>Fifth</span><span>Value</span></div>
+        <div class="xcss-content-row"><span id="last-row">Last row</span><span>Value</span></div>
+      </div></div>
+      <div class="xcss-auth-card corner-preview" id="auth"><form>
+        <label class="xcss-form-field"><span id="login-label">Administrator username</span><input class="xcss-input" id="login-input" name="username"></label>
+        <label class="xcss-form-field"><span>Password</span><input class="xcss-input" id="login-password" name="password" type="password"></label>
+        <p class="xcss-error">Example error</p>
+        <button class="xcss-button" id="login-submit">Sign in securely</button>
+      </form></div>
+      <div class="corner-controls"><span class="xcss-status" id="pill">Online</span><div class="corner-circle" id="circle"></div></div>
+      <div class="test-surface" id="clipped" tabindex="0"><div></div></div>
+      <img id="media" alt="Media" src="./green.svg">
+      <div class="test-surface" id="gradient"></div><div class="test-surface" id="blur"></div>
+      <div class="test-surface" id="unequal"></div><div class="test-surface" id="dashed"></div><div class="test-surface" id="spread"></div>
+      <button class="test-surface" id="state-control" aria-label="State probe"></button><div class="test-surface" id="dark-surface"></div>
+      <table><tbody><tr id="grid-row"><td>Grid row</td></tr></tbody></table>
+      <div class="nested-parent" id="nested-all-parent"><div class="nested-child" id="nested-all"><button class="xcss-button" id="nested-row-button" aria-label="Independent row action">Go</button></div><div id="nested-unselected"></div><div id="nested-independent"></div></div>
+      <div class="nested-parent" id="nested-full-parent"><div class="nested-child" id="nested-full"></div></div>
+      <div class="nested-parent" id="nested-scaled-parent"><div class="nested-child" id="nested-scaled" data-xcss-server-corner-state="authored" data-xcss-server-corner-reason="authored-reason"></div></div>
+      <div class="nested-parent" id="nested-photo-parent"><div class="nested-child" id="nested-photo"></div></div>
+      <div class="nested-parent" id="nested-photo-all-parent"><div class="nested-child" id="nested-photo-all"></div></div>
+      <div class="nested-parent" id="nested-no-match-parent"><div class="nested-child" id="nested-no-match"></div></div>
+      <div class="nested-parent" id="nested-transformed-parent"><div class="nested-child" id="nested-transformed"></div></div>
+      <div class="test-surface" id="nested-no-parent"></div>
+      <div class="xcss-application-boot" id="boot" hidden></div>
+      <dialog class="xcss-dialog" id="dialog" aria-labelledby="dialog-title"><h2 id="dialog-title">Dialog</h2></dialog>
+    </main>
+  </body>
+</html>

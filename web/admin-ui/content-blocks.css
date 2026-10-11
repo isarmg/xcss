@@ -285,4 +285,28 @@ html:not([data-xcss-appearance]), html[data-xcss-appearance="content-blocks"] {
     .xcss-auth-card .xcss-input { border-bottom-color: ButtonText; }
     :is(button, input, select, a):focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
   }
+
+  .xcss-content-panel, .xcss-table-scroll, .xcss-content-table tr {
+    --xcss-server-corner-extent: var(--xcss-server-corner-panel, 42px);
+  }
+  .xcss-toast, .xcss-error, .xcss-empty, .xcss-loading, .xcss-auth-card,
+  .xcss-content-card, .xcss-auth-card:has(> form) {
+    --xcss-server-corner-extent: var(--xcss-server-corner-notification, 48px);
+  }
+  /* Only an active renderer needs the larger corner's minimum text inset. */
+  .xcss-content-card[data-xcss-server-corner-state="clip"] > .xcss-content-card__inner,
+  .xcss-auth-card:is([data-xcss-server-corner-state="clip"], [data-xcss-server-corner-state="paint"]) > form {
+    padding-inline: max(calc(5.5556% - 100cqh / 24), var(--xcss-server-corner-text-inset, 26px));
+  }
+  /* Preserve the first row's baseline at narrow widths: the longer account
+   * label must fit one row after the larger corner's horizontal text inset. */
+  .xcss-auth-card:is([data-xcss-server-corner-state="clip"], [data-xcss-server-corner-state="paint"]) .xcss-form-field > span {
+    font-size: .875em;
+  }
+  body > .main { --xcss-server-corner-extent: var(--xcss-server-corner-panel, 42px); }
+  .xcss-dialog, .action-dialog { --xcss-server-corner-extent: var(--xcss-server-corner-dialog, 54px); }
+  /* Text navigation, underlined login fields and a nested table remain square. */
+  .xcss-header-navigation a, .xcss-content-panel > .xcss-table-scroll,
+  .xcss-auth-card .xcss-input, .xcss-auth-card .xcss-error,
+  .xcss-auth-card > form > button { --xcss-server-corner-extent: 0px; }
 }

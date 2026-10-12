@@ -6,7 +6,7 @@ export type { ServerCornerGeometry, ServerCornerOptions, ServerCornerPoint, Serv
 export interface ServerCornersController { refresh(): void; stop(): void }
 const controllers = new WeakMap<Document, ServerCornersController>();
 type Saved = { value: string; priority: string; applied?: string };
-type RecordState = { saved: Map<string, Saved>; pending: Map<string, string>; transitionDirty: boolean; originalState: string | null; originalReason: string | null; decoration?: HTMLDivElement };
+type RecordState = { saved: Map<string, Saved>; pending: Map<string, string>; transitionDirty: boolean; originalState: string | null; originalReason: string | null; decoration?: HTMLDivElement; restoredStyle?: string; appliedStyle?: string; appliedPaint?: Map<string, string> };
 type Shadow = { color: string; x: number; y: number; blur: number; spread: number };
 const xml = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]!);
 const number = (s: string) => Number.parseFloat(s) || 0;
@@ -151,15 +151,22 @@ export function startServerCorners(document: Document): ServerCornersController 
     record.pending.set(name, value);
   };
   const restore = (element: HTMLElement, record: RecordState, final: boolean) => {
-    draftStyle.cssText = element.style.cssText;
-    for (const [name, saved] of record.saved) {
-      if (!final && transitionNames.includes(name)) continue;
-      const value = element.style.getPropertyValue(name), priority = element.style.getPropertyPriority(name);
-      if (saved.applied !== undefined && (value !== saved.applied || priority !== "important")) { saved.value = value; saved.priority = priority; }
-      if (saved.value) draftStyle.setProperty(name, saved.value, saved.priority); else draftStyle.removeProperty(name);
-      saved.applied = undefined;
+    // Exact inline text proves no author edit occurred. Reuse its previously
+    // restored serialization while still reading every computed style below.
+    if (!final && record.restoredStyle !== undefined && element.style.cssText === record.appliedStyle) {
+      element.style.cssText = record.restoredStyle;
+      for (const [name, saved] of record.saved) if (!transitionNames.includes(name)) saved.applied = undefined;
+    } else {
+      draftStyle.cssText = element.style.cssText;
+      for (const [name, saved] of record.saved) {
+        if (!final && transitionNames.includes(name)) continue;
+        const value = element.style.getPropertyValue(name), priority = element.style.getPropertyPriority(name);
+        if (saved.applied !== undefined && (value !== saved.applied || priority !== "important")) { saved.value = value; saved.priority = priority; }
+        if (saved.value) draftStyle.setProperty(name, saved.value, saved.priority); else draftStyle.removeProperty(name);
+        saved.applied = undefined;
+      }
+      if (element.style.cssText !== draftStyle.cssText) element.style.cssText = draftStyle.cssText;
     }
-    if (element.style.cssText !== draftStyle.cssText) element.style.cssText = draftStyle.cssText;
     record.pending.clear();
     if (record.decoration) record.decoration.style.display = "none";
     if (final) {
@@ -343,9 +350,18 @@ export function startServerCorners(document: Document): ServerCornersController 
     // on attached nodes create needless style invalidations in large galleries.
     for (const [element, record] of records) {
       if (!record.pending.size) continue;
-      draftStyle.cssText = element.style.cssText;
-      for (const [name, value] of record.pending) draftStyle.setProperty(name, value, "important");
-      element.style.cssText = draftStyle.cssText;
+      const restoredStyle = element.style.cssText;
+      const samePaint = record.appliedPaint?.size === record.pending.size && [...record.pending].every(([name, value]) => record.appliedPaint!.get(name) === value);
+      if (restoredStyle === record.restoredStyle && samePaint && record.appliedStyle !== undefined) {
+        element.style.cssText = record.appliedStyle;
+      } else {
+        draftStyle.cssText = restoredStyle;
+        for (const [name, value] of record.pending) draftStyle.setProperty(name, value, "important");
+        element.style.cssText = draftStyle.cssText;
+      }
+      record.restoredStyle = restoredStyle;
+      record.appliedStyle = element.style.cssText;
+      record.appliedPaint = new Map(record.pending);
       // Gecko may serialize colours differently after cssText is assigned to
       // the real node. Compare author edits with this actual applied value.
       for (const name of record.pending.keys()) record.saved.get(name)!.applied = element.style.getPropertyValue(name);

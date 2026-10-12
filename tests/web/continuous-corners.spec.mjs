@@ -125,6 +125,35 @@ test("dynamic content, resizing, dialogs, RTL, forced colors and stop preserve a
   await expect(page.locator("[data-xcss-server-corner-decoration]")).toHaveCount(0);
 });
 
+test("repeated refreshes preserve theme changes, inline edits and clip mode changes", async ({ page }) => {
+  await ready(page);
+  await page.evaluate(() => {
+    const rules = document.createElement("style");
+    rules.textContent = "#refresh-cache.changed { background-color:rgb(9, 8, 7); border-color:rgb(5, 6, 7) }";
+    document.head.append(rules);
+    const node = document.createElement("div");
+    node.id = "refresh-cache"; node.className = "test-surface";
+    node.style.cssText = "width:170px;height:90px;border:3px solid rgb(1, 2, 3)";
+    node.dataset.xcssServerCorner = "clip";
+    document.querySelector("main").append(node);
+  });
+  const node = page.locator("#refresh-cache");
+  await expect(node).toHaveAttribute("data-xcss-server-corner-state", "clip");
+  const firstPaint = await node.evaluate(node => node.style.borderImageSource);
+  for (let i = 0; i < 4; i++) { await page.evaluate(() => window.serverCorners.refresh()); await frame(page); }
+  expect(await node.evaluate(node => node.style.borderImageSource)).toBe(firstPaint);
+  await node.evaluate(node => node.classList.add("changed")); await frame(page);
+  expect(await node.evaluate(node => node.style.borderImageSource)).not.toBe(firstPaint);
+  await node.evaluate(node => { node.dataset.xcssServerCorner = "paint"; node.style.backgroundColor = "rgb(11, 12, 13)"; }); await frame(page);
+  await expect(node).toHaveAttribute("data-xcss-server-corner-state", "paint");
+  await expect(node).toHaveCSS("mask-image", "none");
+  for (let i = 0; i < 4; i++) { await page.evaluate(() => window.serverCorners.refresh()); await frame(page); }
+  await page.evaluate(() => window.serverCorners.stop());
+  await expect(node).toHaveCSS("background-color", "rgb(11, 12, 13)");
+  await expect(node).toHaveCSS("border-top-color", "rgb(1, 2, 3)");
+  await expect(node).not.toHaveAttribute("data-xcss-server-corner-state");
+});
+
 test("large corners retain narrow six-row text and mobile login text", async ({ page }, info) => {
   await ready(page);
   const safe = (id, ids) => page.evaluate(({ id, ids }) => {

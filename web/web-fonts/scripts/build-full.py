@@ -22,6 +22,7 @@ def main():
     source_assets = manifest["source_assets"]
     generated = {}
     coverage = {}
+    additional_codepoints = set()
     with zipfile.ZipFile(io.BytesIO(archive_bytes)) as archive:
         (ROOT / "CJK-LICENSE.txt").write_bytes(archive.read("LICENSE.txt"))
         for style, weight in [("Regular", 400), ("Bold", 700)]:
@@ -31,6 +32,7 @@ def main():
             latin = TTFont(io.BytesIO(latin_bytes), recalcTimestamp=False)
             cjk = TTFont(io.BytesIO(archive.read(f"MapleMonoNL-CN-{style}.ttf")), recalcTimestamp=False)
             expected = set(latin.getBestCmap()) | set(cjk.getBestCmap())
+            additional_codepoints.update(set(cjk.getBestCmap()) - set(latin.getBestCmap()))
             # Preserve the verified Normal NL Western glyphs, and merge every
             # other CJK mapping into the same face. No Unicode shard is emitted.
             options = subset.Options()
@@ -76,6 +78,7 @@ def main():
     }
     manifest.pop("bootstrap", None)
     manifest["cjk"].pop("maximum_asset_bytes", None)
+    manifest["cjk"]["additional_codepoints"] = len(additional_codepoints)
     manifest["distribution"] = {"mode": "complete-fonts", "weights": [400, 700],
                                 "unicode_shards": False, "faces": coverage,
                                 "fonttools": "4.60.1", "brotli": "1.1.0"}

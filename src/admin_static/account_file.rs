@@ -29,24 +29,27 @@ const FILE: &str = "administrator-accounts.json";
 
 /// Shared current-document validation for both runtime loading and read-only
 /// diagnostics. The expected set describes stable configured identities.
-fn read_accounts(
+pub(super) fn read_accounts(
     directory: &PrivateDirectory,
-    configured_ids: &[String],
+    configured_ids: Option<&[String]>,
 ) -> Result<Vec<AdministratorRecord>, Error> {
     let bytes = directory.read_bounded(&EntryName::new(FILE)?, 1024 * 1024)?;
     let saved: AccountDocument =
         serde_json::from_slice(&bytes).map_err(|_| Error::InvalidAccountFile)?;
-    if saved.version != 1 || saved.accounts.len() != configured_ids.len() {
+    if saved.version != 1 {
         return Err(Error::InvalidAccountFile);
     }
-    let ids: HashSet<_> = configured_ids.iter().map(String::as_str).collect();
-    if ids.len() != configured_ids.len()
-        || saved
-            .accounts
-            .iter()
-            .any(|record| !ids.contains(record.id.as_str()))
-    {
-        return Err(Error::InvalidAccountFile);
+    if let Some(configured_ids) = configured_ids {
+        let ids: HashSet<_> = configured_ids.iter().map(String::as_str).collect();
+        if saved.accounts.len() != configured_ids.len()
+            || ids.len() != configured_ids.len()
+            || saved
+                .accounts
+                .iter()
+                .any(|record| !ids.contains(record.id.as_str()))
+        {
+            return Err(Error::InvalidAccountFile);
+        }
     }
     let records = saved
         .accounts
@@ -72,7 +75,7 @@ pub(super) fn validate_accounts(
     directory: &PrivateDirectory,
     configured_ids: &[String],
 ) -> Result<(), Error> {
-    read_accounts(directory, configured_ids).map(|_| ())
+    read_accounts(directory, Some(configured_ids)).map(|_| ())
 }
 impl AccountFile {
     pub(super) fn open(
@@ -91,7 +94,7 @@ impl AccountFile {
             .iter()
             .map(|record| record.administrator_id.to_string())
             .collect::<Vec<_>>();
-        let saved = match read_accounts(&file.directory, &ids) {
+        let saved = match read_accounts(&file.directory, Some(&ids)) {
             Ok(records) => Some(records),
             Err(Error::Filesystem(crate::fs_safety::Error::Io(error)))
                 if error.kind() == std::io::ErrorKind::NotFound =>
@@ -279,5 +282,49 @@ mod tests {
                 .is_err()
         );
         assert_eq!(std::fs::read(directory.path().join(FILE)).unwrap(), before);
+    }
+
+    #[test]
+    fn loading_saved_accounts_does_not_initialize_or_require_configured_passwords() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = PrivateDirectory::create(temp.path().join("accounts")).unwrap();
+        assert!(StaticAdministratorStore::load_persistent_accounts(&directory, None).is_err());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+
+        let records = configured();
+        let store =
+            StaticAdministratorStore::with_persistent_accounts(records.clone(), directory).unwrap();
+        drop(store);
+        let directory = PrivateDirectory::open_existing(temp.path().join("accounts")).unwrap();
+        let before = std::fs::read(directory.path().join(FILE)).unwrap();
+        let entries = std::fs::read_dir(directory.path()).unwrap().count();
+        let loaded = StaticAdministratorStore::load_persistent_accounts(&directory, None).unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].administrator_id, records[0].administrator_id);
+        assert_eq!(loaded[0].username, records[0].username);
+        assert_eq!(loaded[0].password_hash, records[0].password_hash);
+        assert!(StaticAdministratorStore::load_persistent_accounts(
+            &directory,
+            Some(&["wrong".into()]),
+        ).is_err());
+        assert_eq!(std::fs::read(directory.path().join(FILE)).unwrap(), before);
+        assert_eq!(
+            std::fs::read_dir(directory.path()).unwrap().count(),
+            entries
+        );
+
+        let valid: serde_json::Value = serde_json::from_slice(&before).unwrap();
+        for invalid in [
+            serde_json::json!({"version": 2, "accounts": valid["accounts"]}),
+            serde_json::json!({"version": 1, "accounts": []}),
+            serde_json::json!({"version": 1, "accounts": [valid["accounts"][0], valid["accounts"][0]]}),
+        ] {
+            std::fs::write(
+                directory.path().join(FILE),
+                serde_json::to_vec(&invalid).unwrap(),
+            )
+            .unwrap();
+            assert!(StaticAdministratorStore::load_persistent_accounts(&directory, None).is_err());
+        }
     }
 }

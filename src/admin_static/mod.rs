@@ -33,6 +33,17 @@ pub struct StaticAdministratorStore {
 }
 
 impl StaticAdministratorStore {
+    /// Read existing protected accounts without initializing state or acquiring
+    /// a writer lock. When supplied, stable IDs must match the saved set exactly.
+    /// Omitting IDs supports products whose account identities live in state
+    /// rather than being repeated in deployment configuration.
+    pub fn load_persistent_accounts(
+        directory: &crate::fs_safety::PrivateDirectory,
+        configured_ids: Option<&[String]>,
+    ) -> Result<Vec<AdministratorRecord>, Error> {
+        account_file::read_accounts(directory, configured_ids)
+    }
+
     /// Validate the existing current account document without acquiring a
     /// writer lock, changing permissions, saving accounts or making sessions.
     pub fn validate_persistent_accounts(

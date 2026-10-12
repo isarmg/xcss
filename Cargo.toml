@@ -1,5 +1,5 @@
 [package]
-"version" = "1.0.7"
+"version" = "1.0.8"
 "edition" = "2024"
 "rust-version" = "1.99"
 "authors" = ["sarmg <isarmg@163.com>"]

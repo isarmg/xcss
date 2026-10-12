@@ -5,13 +5,14 @@ test("loading an existing record clears obsolete required-field errors", async (
   await page.goto("/?lang=en#validation");
   const name = page.getByRole("textbox", { name: "Name", exact: true });
   const category = page.getByRole("combobox", { name: "Category", exact: true });
+  const categoryNative = page.locator(".xcss-select-native");
   await page.getByRole("button", { name: "Save", exact: true }).click();
-  for (const field of [name, category]) {
+  for (const field of [name, categoryNative]) {
     await expect.poll(() => field.evaluate(element => element.validity.customError)).toBe(true);
   }
   await expect(page.getByTestId("saved-count")).toHaveText("0");
   await page.getByRole("button", { name: "Edit existing", exact: true }).click();
-  for (const field of [name, category]) {
+  for (const field of [name, categoryNative]) {
     await expect.poll(() => field.evaluate(element => element.validity.valid)).toBe(true);
   }
   await page.getByRole("button", { name: "Save", exact: true }).click();

@@ -601,9 +601,12 @@ const inspectIndependent = (page, id) => page.evaluate(async id => {
   const node = document.getElementById(id), css = getComputedStyle(node);
   const box = node.getBoundingClientRect();
   const expected = window.createServerCornerGeometry({ width:box.width, height:box.height, extent:parseFloat(css.getPropertyValue("--xcss-server-corner-extent")), tolerance:.02 });
-  const url = node.style.borderImageSource.match(/url\(["']?(.*?)["']?\)/)[1];
+  const sourceProperty = node.style.borderImageSource === "none" ? "backgroundImage" : "borderImageSource";
+  const match = node.style[sourceProperty].match(/url\(["']?(.*?)["']?\)/);
+  if (!match) throw new Error(`Expected renderer SVG in ${sourceProperty} for ${id}`);
+  const url = match[1];
   const svg = new DOMParser().parseFromString(await (await fetch(url)).text(), "image/svg+xml");
-  return { actualPath:svg.querySelector("clipPath#inside path").getAttribute("d"), expectedPath:expected.path, extents:expected.corners.map(corner => corner.extent) };
+  return { actualPath:svg.querySelector("clipPath#inside path").getAttribute("d"), expectedPath:expected.path, extents:expected.corners.map(corner => corner.extent), sourceProperty, borderImageSource:css.borderImageSource };
 }, id);
 
 test("nested surfaces keep their own uniform corners when the parent and spacing change", async ({ page }, info) => {
@@ -618,6 +621,8 @@ test("nested surfaces keep their own uniform corners when the parent and spacing
   expect(moved.actualPath).toBe(original.actualPath);
   expect(moved.actualPath).toBe(moved.expectedPath);
   const button = await inspectIndependent(page, "independent-row-button");
+  expect(button.sourceProperty).toBe("backgroundImage");
+  expect(button.borderImageSource).toBe("none");
   expect(button.actualPath).toBe(button.expectedPath);
   expect(button.extents).toEqual([10,10,10,10]);
   await page.locator("#independent-parent").screenshot({ path:info.outputPath("independent-uniform-corners.png") });

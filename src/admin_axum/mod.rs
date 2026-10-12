@@ -11,13 +11,12 @@ use crate::contracts::{
 };
 use axum::{
     Router,
-    extract::{ConnectInfo, Request, State},
+    extract::{Request, State},
     http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
 use std::{
-    net::SocketAddr,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -143,8 +142,8 @@ where
     {
         return *response;
     }
-    let source = match parts.extensions.get::<ConnectInfo<SocketAddr>>() {
-        Some(value) => value.0.ip().to_canonical().to_string(),
+    let source = match crate::client_ip::from_extensions(&parts.extensions) {
+        Some(value) => value.to_string(),
         None => {
             return error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -615,7 +614,9 @@ mod tests {
     use crate::admin_core::{AdministratorRecord, Identifier};
     use crate::admin_static::StaticAdministratorStore;
     use axum::body::to_bytes;
+    use axum::extract::ConnectInfo;
     use axum::http::{Method, Request as HttpRequest};
+    use std::net::SocketAddr;
     use tower::ServiceExt;
 
     fn request(method: Method, path: &str, body: &str) -> HttpRequest<axum::body::Body> {

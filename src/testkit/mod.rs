@@ -1,7 +1,9 @@
 //! Test-only assertions shared by wire adapters and their consumers.
 //! Add this crate as a dev-dependency, never as a production service dependency.
 
+mod deployment;
 mod management;
+pub use deployment::assert_deployment_cli_contract;
 pub use management::assert_administrator_management_http_contract;
 
 use crate::contracts::{

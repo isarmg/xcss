@@ -104,6 +104,15 @@ impl StaticAdministratorStore {
         Ok(store)
     }
 
+    /// Reset an existing account while the caller holds the offline maintenance lock.
+    pub fn reset_persistent_password(
+        directory: crate::fs_safety::PrivateDirectory,
+        username: &str,
+        password_hash: &str,
+    ) -> Result<(), Error> {
+        account_file::reset_password(directory, username, password_hash)
+    }
+
     pub fn active_session_count(&self) -> Result<usize, Error> {
         let now = current_time_micros()?;
         Ok(self
@@ -483,6 +492,8 @@ pub enum Error {
     Authentication(#[from] crate::admin_auth::Error),
     #[error("static administrator configuration must contain at least one administrator")]
     NoAdministrators,
+    #[error("administrator account does not exist")]
+    AdministratorNotFound,
     #[error("static administrator configuration exceeds the platform capacity")]
     TooManyAdministrators,
     #[error("static administrator identifiers must be unique")]

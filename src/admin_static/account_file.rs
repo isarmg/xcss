@@ -131,6 +131,35 @@ impl AccountFile {
     }
 }
 
+pub(super) fn reset_password(
+    directory: PrivateDirectory,
+    username: &str,
+    password_hash: &str,
+) -> Result<(), Error> {
+    crate::admin_auth::require_canonical_administrator_username(username)?;
+    crate::admin_auth::require_current_password_hash(password_hash)?;
+    let lock = AdvisoryLock::acquire(
+        &directory,
+        &RelativePath::new(".administrator-accounts.lock")?,
+    )?;
+    let file = AccountFile {
+        directory,
+        _lock: lock,
+    };
+    let mut records = read_accounts(&file.directory, None)?;
+    let record = records
+        .iter_mut()
+        .find(|record| record.username == username)
+        .ok_or(Error::AdministratorNotFound)?;
+    record.session_version = record
+        .session_version
+        .checked_add(1)
+        .ok_or(Error::InvalidAccountFile)?;
+    record.password_hash = password_hash.to_owned();
+    StaticAdministratorStore::new(records.clone())?;
+    file.save(&records)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -157,6 +186,57 @@ mod tests {
             last_login_at_micros: None,
         }]
     }
+    #[test]
+    fn offline_reset_preserves_identity_and_requires_existing_account() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("accounts");
+        let directory = PrivateDirectory::create(&path).unwrap();
+        let hash = crate::admin_auth::hash_password("new correct horse battery").unwrap();
+        assert!(reset_password(directory, "admin", &hash).is_err());
+        assert!(!path.join(FILE).exists());
+        let records = configured();
+        let original_id = records[0].administrator_id.clone();
+        let (file, _) =
+            AccountFile::open(PrivateDirectory::open_existing(&path).unwrap(), records).unwrap();
+        assert!(
+            reset_password(
+                PrivateDirectory::open_existing(&path).unwrap(),
+                "admin",
+                &hash
+            )
+            .is_err()
+        );
+        drop(file);
+        let before = std::fs::read(path.join(FILE)).unwrap();
+        assert!(
+            reset_password(
+                PrivateDirectory::open_existing(&path).unwrap(),
+                "missing",
+                &hash
+            )
+            .is_err()
+        );
+        assert!(
+            reset_password(
+                PrivateDirectory::open_existing(&path).unwrap(),
+                "admin",
+                "invalid"
+            )
+            .is_err()
+        );
+        assert_eq!(before, std::fs::read(path.join(FILE)).unwrap());
+        reset_password(
+            PrivateDirectory::open_existing(&path).unwrap(),
+            "admin",
+            &hash,
+        )
+        .unwrap();
+        let saved = read_accounts(&PrivateDirectory::open_existing(&path).unwrap(), None).unwrap();
+        assert_eq!(saved[0].administrator_id, original_id);
+        assert_eq!(saved[0].session_version, 2);
+        assert_eq!(saved[0].password_hash, hash);
+    }
+
     #[tokio::test]
     async fn account_changes_survive_restart_without_recreating_sessions() {
         let temp = tempfile::tempdir().unwrap();

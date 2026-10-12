@@ -328,7 +328,15 @@ impl<'de> MapAccess<'de> for Object {
         self.pending = Some((path.clone(), value));
         seed.deserialize(key.into_deserializer())
             .map(Some)
-            .map_err(|error: DataError| error.at(&path))
+            .map_err(|error: DataError| {
+                // Serde's deny_unknown_fields error already includes this key.
+                // Other key conversion failures still belong to the key itself.
+                if error.relative {
+                    error.at(&self.path)
+                } else {
+                    error.at(&path)
+                }
+            })
     }
     fn next_value_seed<V: DeserializeSeed<'de>>(&mut self, seed: V) -> Result<V::Value, DataError> {
         let (path, value) = self

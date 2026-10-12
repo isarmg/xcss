@@ -360,3 +360,29 @@ fn private_configuration_read_is_bounded_readonly_and_rejects_unsafe_files() {
         Reason::LimitExceeded
     );
 }
+
+#[test]
+fn deny_unknown_fields_reports_each_key_once() {
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct StrictChild {}
+    #[derive(Debug, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct StrictRoot {
+        #[serde(rename = "child")]
+        _child: StrictChild,
+    }
+    for (value, expected) in [
+        (json!({"old_key":"private-value"}), "/old_key"),
+        (json!({"child":{"a/b~c":"private-value"}}), "/child/a~1b~0c"),
+    ] {
+        let error = strict::deserialize::<StrictRoot>(value, ConfigSource::File).unwrap_err();
+        assert_eq!(error.reason, Reason::UnknownField);
+        assert_eq!(error.path, expected);
+        assert!(
+            !serde_json::to_string(&error.envelope())
+                .unwrap()
+                .contains("private-value")
+        );
+    }
+}

@@ -37,4 +37,4 @@ xcss 的产品接入由 `xcss-product.toml` 声明。产品的业务配置字段
 
 详见[工作区配置](admin-workspace.md)。语言按 URL 参数、保存偏好、浏览器语言选择，支持 `zh-CN` 与 `en`；主题默认跟随系统，用户选择可保存。规则见[语言](admin-web-language.md)与[账号和主题](web-account-settings.md)。
 
-React 构建的单资源预算默认 512 KiB，`maxAssetBytes` 接受 `1`–`67108864` 字节的安全整数；原生 ESM 默认 256 KiB。生产资源通过[内嵌构建](reference/embedded-web.md)与服务端一起交付。
+React 构建的单资源预算默认 512 KiB，`maxAssetBytes` 接受 `1`–`67108864` 字节的安全整数；原生 ESM 默认 256 KiB。完整 WOFF/WOFF2 字体使用独立 16 MiB 预算，JS/CSS 和其他资源预算不变。生产资源通过[内嵌构建](reference/embedded-web.md)与服务端一起交付。

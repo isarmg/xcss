@@ -5,7 +5,7 @@ import { assetBudget } from "./asset-budget.js";
 export function createXcssNativeModuleViteConfig(options: { entry: string; outDir: string }): UserConfig {
   return defineConfig({
     base: "./",
-    plugins: [assetBudget(256 * 1024)],
+    plugins: [assetBudget(256 * 1024, 16 * 1024 * 1024)],
     build: {
       target: "esnext", cssTarget: "esnext", modulePreload: { polyfill: false },
       outDir: process.env.XCSS_WEB_DIST ?? options.outDir, emptyOutDir: true, sourcemap: false, assetsInlineLimit: 0, cssCodeSplit: false,

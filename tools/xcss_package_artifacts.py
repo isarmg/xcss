@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
-CLI_VERSION = "1.0.5"
+CLI_VERSION = "1.0.6"
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_TARBALL_BYTES = 64 * 1024 * 1024
 PACKAGE_NAME = re.compile(r"@xcss/[a-z][a-z0-9-]*")

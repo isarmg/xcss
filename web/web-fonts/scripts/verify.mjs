@@ -10,7 +10,8 @@ for (const [name, expected] of Object.entries(provenance.assets)) {
 }
 const css = await readFile(new URL("../fonts.css", import.meta.url), "utf8");
 const faces = [...css.matchAll(/@font-face\{([^}]+)\}/gu)];
-assert.ok(faces.length > 2);
+assert.equal(faces.length, 2, "Complete Regular and Bold fonts are the only runtime faces");
+assert.ok(!css.includes("unicode-range"), "Runtime fonts must not be split into Unicode shards");
 for (const [, face] of faces) {
   assert.ok(face.includes("font-display:block;"), "Every font is prepared before the UI is displayed");
 }

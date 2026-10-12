@@ -170,7 +170,7 @@ export function startServerCorners(document: Document): ServerCornersController 
       records.delete(element);
     }
   };
-  const prepareTransitions = (element: HTMLElement) => {
+  const prepareTransitions = (element: HTMLElement, measured?: CSSStyleDeclaration) => {
     const previous = records.get(element);
     if (previous && !previous.transitionDirty) return;
     // Read author transition configuration with paint overrides still in place;
@@ -186,7 +186,7 @@ export function startServerCorners(document: Document): ServerCornersController 
       }
       if (element.style.cssText !== draftStyle.cssText) element.style.cssText = draftStyle.cssText;
     }
-    const css = view.getComputedStyle(element);
+    const css = measured ?? view.getComputedStyle(element);
     const properties = split(css.transitionProperty, "comma");
     const lists = transitionNames.slice(1).map(name => split(css.getPropertyValue(name), "comma"));
     // The UA default is `all 0s`, which needs no intervention. Expanding it on
@@ -231,7 +231,7 @@ export function startServerCorners(document: Document): ServerCornersController 
       if (record.decoration) record.decoration.style.display = "none";
     }
     const selected = new Set<HTMLElement>();
-    type Candidate = { node: HTMLElement; css: CSSStyleDeclaration; rect: DOMRect; fragmented: boolean };
+    type Candidate = { node: HTMLElement; css: CSSStyleDeclaration; width: number; height: number; fragmented: boolean };
     const candidates: Candidate[] = [];
     // Read every candidate before paint writes, avoiding a style/layout flush
     // per tile in large galleries. Unselected descendants inherit extent=0.
@@ -239,21 +239,27 @@ export function startServerCorners(document: Document): ServerCornersController 
       if (node.namespaceURI !== "http://www.w3.org/1999/xhtml" || node.hasAttribute("data-xcss-server-corner-decoration")) continue;
       const live = view.getComputedStyle(node);
       if (number(node.getAttribute("data-xcss-server-corner-extent") ?? live.getPropertyValue("--xcss-server-corner-extent")) <= 0) continue;
-      if (!records.has(node)) prepareTransitions(node);
-      candidates.push({ node, css: snapshot(view.getComputedStyle(node)), rect: node.getBoundingClientRect(), fragmented: node.getClientRects().length > 1 });
+      if (!records.has(node)) prepareTransitions(node, live);
+      const css = snapshot(live);
+      let rect: DOMRect | undefined;
+      const measuredDimension = (axis: "width" | "height") => {
+        const fallback = () => (rect ??= node.getBoundingClientRect())[axis];
+        if (!/^(?:\d+\.?\d*|\.\d+)px$/.test(css[axis])) return fallback();
+        const value = number(css[axis]);
+        const sides = axis === "width" ? ["left", "right"] : ["top", "bottom"];
+        const size = css.boxSizing === "border-box" ? value : value + sides.reduce((sum, side) => sum + number(css.getPropertyValue(`padding-${side}`)) + number(css.getPropertyValue(`border-${side}-width`)), 0);
+        return size || fallback();
+      };
+      // Definite CSS dimensions already describe the untransformed border box.
+      // Avoid a bounding-box read per tile in ordinary block galleries. Keep
+      // the fragment check for both inline content and multi-column blocks.
+      candidates.push({ node, css, width: measuredDimension("width"), height: measuredDimension("height"), fragmented: node.getClientRects().length > 1 });
     }
-    for (const { node, css, rect, fragmented } of candidates) {
+    for (const { node, css, width, height, fragmented } of candidates) {
       const raw = node.getAttribute("data-xcss-server-corner-extent") ?? css.getPropertyValue("--xcss-server-corner-extent").trim();
       const mode = node.getAttribute("data-xcss-server-corner") ?? css.getPropertyValue("--xcss-server-corner-mode").trim();
       if (mode === "none" || number(raw) <= 0) continue;
       selected.add(node); resize.observe(node);
-      const dimension = (axis: "width" | "height") => {
-        if (!/^(?:\d+\.?\d*|\.\d+)px$/.test(css[axis])) return axis === "width" ? rect.width : rect.height;
-        const value = number(css[axis]);
-        const sides = axis === "width" ? ["left", "right"] : ["top", "bottom"];
-        return css.boxSizing === "border-box" ? value : value + sides.reduce((sum, side) => sum + number(css.getPropertyValue(`padding-${side}`)) + number(css.getPropertyValue(`border-${side}-width`)), 0);
-      };
-      const width = dimension("width") || rect.width, height = dimension("height") || rect.height;
       if (forced.matches || width <= 0 || height <= 0 || ["table", "table-row", "table-cell"].includes(css.display) || fragmented) { mark(node, "fallback", forced.matches ? "forced-colors" : width <= 0 || height <= 0 ? "not-visible" : fragmented ? "fragmented-inline" : "table-layout"); continue; }
       if (css.borderImageSource !== "none" || css.maskImage !== "none") { mark(node, "fallback", css.maskImage !== "none" ? "existing-mask" : "existing-border-image"); continue; }
       const extent = raw.endsWith("%") ? number(raw) * Math.min(width, height) / 100 : number(raw);

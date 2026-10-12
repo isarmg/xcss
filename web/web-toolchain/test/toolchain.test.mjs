@@ -16,6 +16,8 @@ test("native ESM uses relative assets, no React and the platform hard budget", (
   const context = { error(message) { throw new Error(message); } };
   assert.throws(() => config.plugins[0].generateBundle.call(context, {}, { "oversize.js": { type: "chunk", code: "x".repeat(256 * 1024 + 1) } }), /exceeds/);
   assert.doesNotThrow(() => config.plugins[0].generateBundle.call(context, {}, { "font.woff2": { type: "asset", source: new Uint8Array(256 * 1024) } }));
+  assert.doesNotThrow(() => config.plugins[0].generateBundle.call(context, {}, { "complete.woff2": { type: "asset", source: new Uint8Array(6 * 1024 * 1024) } }));
+  assert.throws(() => config.plugins[0].generateBundle.call(context, {}, { "oversize.woff2": { type: "asset", source: new Uint8Array(16 * 1024 * 1024 + 1) } }), /exceeds/);
 });
 test("asset sizes and source maps are hard release gates, not warnings", () => {
   const config = createXcssReactViteConfig({ maxAssetBytes: 1024 });

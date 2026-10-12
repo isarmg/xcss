@@ -92,25 +92,25 @@ export async function checkFontStartup(args = process.argv.slice(2)) {
         for (const url of urls) {
           const context = await browser.newContext({ colorScheme, storageState, viewport: { width: 360, height: 740 } });
           const page = await context.newPage();
-          let releaseBootstrap, releaseShards;
-          const bootstrapGate = new Promise(done => { releaseBootstrap = done; });
-          const shardGate = new Promise(done => { releaseShards = done; });
+          let releaseRegular, releaseBold;
+          const regularGate = new Promise(done => { releaseRegular = done; });
+          const boldGate = new Promise(done => { releaseBold = done; });
           const requests = new Map(), errors = [];
-          let heldBootstrap = 0, heldShards = 0;
+          let heldRegular = 0, heldBold = 0;
           page.on("pageerror", error => errors.push(error.message));
           page.on("request", request => { if (request.url().endsWith(".woff2")) requests.set(request.url(), (requests.get(request.url()) ?? 0) + 1); });
-          await page.route(/MapleMonoBootstrap-Regular[^/]*\.woff2$/u, async route => { heldBootstrap++; await bootstrapGate; await route.continue(); });
-          await page.route(/MapleMonoNL-CN-(Regular|Bold)-9CCF-9E67[^/]*\.woff2$/u, async route => { heldShards++; await shardGate; await route.continue(); });
+          await page.route(/MapleMonoFull-Regular[^/]*\.woff2$/u, async route => { heldRegular++; await regularGate; await route.continue(); });
+          await page.route(/MapleMonoFull-Bold[^/]*\.woff2$/u, async route => { heldBold++; await boldGate; await route.continue(); });
           try {
             await page.goto(url, { waitUntil: "domcontentloaded" });
-            await expect.poll(() => ({ bootstrap: heldBootstrap, shards: heldShards }), { timeout: 15_000 }).toEqual({ bootstrap: 1, shards: 2 });
+            await expect.poll(() => ({ regular: heldRegular, bold: heldBold }), { timeout: 15_000 }).toEqual({ regular: 1, bold: 1 });
             await page.waitForTimeout(1500);
             await expect(page.locator("html")).toHaveAttribute("data-xcss-fonts", "pending");
             await assertPlainBackground(page, colorScheme === "dark");
-            releaseBootstrap();
-            await expect.poll(() => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("Bootstrap") && face.weight === "400").every(face => face.status === "loaded"))).toBe(true);
+            releaseRegular();
+            await expect.poll(() => page.evaluate(() => [...document.fonts].filter(face => face.family.includes("Sarmg Maple") && face.weight === "400").every(face => face.status === "loaded"))).toBe(true);
             await assertPlainBackground(page, colorScheme === "dark");
-            releaseShards();
+            releaseBold();
             await expect(page.locator("html")).toHaveAttribute("data-xcss-fonts", "ready", { timeout: 15_000 });
             await expect.poll(() => page.locator("body").innerText()).not.toBe("");
             const decoded = await page.evaluate(() => ({ loaded: [...document.fonts].every(face => face.status === "loaded"), unique: new Set([...document.fonts].map(face => `${face.family}:${face.weight}:${face.unicodeRange}`)).size }));
@@ -138,13 +138,13 @@ export async function checkFontStartup(args = process.argv.slice(2)) {
             assert.ok([...requests.values()].every(count => count === 1));
             assert.deepEqual(errors, []);
             console.log(`${url}: ${engine.name()} plain background while pending; all ${expectedFaces} fonts decoded before UI; later text stable`);
-          } finally { releaseBootstrap(); releaseShards(); await context.close(); }
+          } finally { releaseRegular(); releaseBold(); await context.close(); }
         }
         // A broken font must never release the UI or activate a timeout fallback.
         const page = await browser.newPage({ colorScheme, storageState, viewport: { width: 360, height: 740 } });
         const failures = [];
         page.on("console", message => { if (message.text().includes("Application font preparation failed")) failures.push(message.text()); });
-        await page.route(/MapleMonoNL-CN-Regular-9CCF-9E67[^/]*\.woff2$/u, route => route.fulfill({ status: 503, body: "" }));
+        await page.route(/MapleMonoFull-Regular[^/]*\.woff2$/u, route => route.fulfill({ status: 503, body: "" }));
         await page.goto(urls.at(-1), { waitUntil: "domcontentloaded" });
         await expect.poll(() => failures.length, { timeout: 15_000 }).toBe(1);
         await page.waitForTimeout(1500);

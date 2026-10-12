@@ -2,7 +2,7 @@
 /** @type {Promise<void> | undefined} */
 let preparation;
 
-/** Load and decode every registered face, including unused Unicode shards.
+/** Load and decode the complete Regular and Bold fonts before showing the UI.
  * @returns {Promise<void>}
  */
 export function prepareApplicationFonts() {
@@ -14,7 +14,8 @@ export function prepareApplicationFonts() {
     if (!faces.some(face => face.family.replaceAll('"', "") === "Sarmg Maple")) {
       throw new Error("Application font styles must load before startup");
     }
-    // FontFace.load() ignores unicode-range matching and decodes the entire face.
+    // Both complete fonts are prepared once, including characters absent from
+    // the initial page, so later menus never trigger another font download.
     await Promise.all(faces.map(face => face.load()));
     await document.fonts.ready;
     if (faces.some(face => face.status !== "loaded")) throw new Error("Application fonts are incomplete");

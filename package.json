@@ -1,6 +1,6 @@
 {
   "name": "@xcss/web",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": false,
   "description": "Linux AMD64 xcss server administrator Web support and build inputs",
   "license": "Apache-2.0",
@@ -90,13 +90,8 @@
     },
     "./web-fonts/fonts.css": "./dist/web-fonts/fonts.css",
     "./web-fonts/boot.css": "./dist/web-fonts/boot.css",
-    "./web-fonts/MapleMono.woff2": "./dist/web-fonts/MapleMono.woff2",
-    "./web-fonts/MapleMono-Italic.woff2": "./dist/web-fonts/MapleMono-Italic.woff2",
     "./web-fonts/provenance.json": "./dist/web-fonts/provenance.json",
     "./web-fonts/OFL.txt": "./dist/web-fonts/OFL.txt",
-    "./web-fonts/MapleMonoNormalNL-Regular.woff2": "./dist/web-fonts/MapleMonoNormalNL-Regular.woff2",
-    "./web-fonts/MapleMonoBootstrap-Regular.woff2": "./dist/web-fonts/MapleMonoBootstrap-Regular.woff2",
-    "./web-fonts/MapleMonoBootstrap-Bold.woff2": "./dist/web-fonts/MapleMonoBootstrap-Bold.woff2",
     "./web-fonts/CJK-LICENSE.txt": "./dist/web-fonts/CJK-LICENSE.txt",
     "./web-toolchain": {
       "types": "./dist/web-toolchain/index.d.ts",
@@ -157,7 +152,9 @@
     "./admin-shell/workspace-config": {
       "types": "./dist/admin-shell/workspace-config.d.ts",
       "import": "./dist/admin-shell/workspace-config.js"
-    }
+    },
+    "./web-fonts/MapleMonoFull-Regular.woff2": "./dist/web-fonts/MapleMonoFull-Regular.woff2",
+    "./web-fonts/MapleMonoFull-Bold.woff2": "./dist/web-fonts/MapleMonoFull-Bold.woff2"
   },
   "peerDependencies": {
     "@vitejs/plugin-react": "6.1.2",

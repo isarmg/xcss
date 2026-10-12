@@ -36,7 +36,7 @@ test("the standalone source fixture serves its actual startup and font assets", 
   assert.ok(page.body.includes(await readFile(resolve(fonts, "boot.css"), "utf8")));
   assert.match(page.body, /data-xcss-fonts="pending"/u);
   assert.match(page.body, /startAfterFonts/u);
-  for (const [path, contentType] of [["fonts.css", "text/css"], ["ready.js", "text/javascript"], ["MapleMonoBootstrap-Regular.woff2", "font/woff2"]]) {
+  for (const [path, contentType] of [["fonts.css", "text/css"], ["ready.js", "text/javascript"], ["MapleMonoFull-Regular.woff2", "font/woff2"]]) {
     const response = await request(`/${path}`);
     assert.equal(response.statusCode, 200);
     assert.equal(response.headers["content-type"], contentType);

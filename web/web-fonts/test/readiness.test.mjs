@@ -7,13 +7,13 @@ function deferred() {
   return { promise, resolve };
 }
 
-test("startup waits for unused shards and decoding, and shares a single preparation", async () => {
+test("startup waits for both complete fonts and decoding, and shares a single preparation", async () => {
   const originalDocument = globalThis.document;
-  const shard = deferred(), decoded = deferred();
+  const completeFont = deferred(), decoded = deferred();
   const calls = [];
-  const faces = ["Sarmg Maple Bootstrap", "Sarmg Maple", "Sarmg Maple"].map((family, index) => ({
+  const faces = ["Sarmg Maple", "Sarmg Maple"].map((family, index) => ({
     family, status: "unloaded",
-    async load() { calls.push(index); if (index === 2) await shard.promise; this.status = "loaded"; return this; },
+    async load() { calls.push(index); if (index === 1) await completeFont.promise; this.status = "loaded"; return this; },
   }));
   globalThis.document = { documentElement: { dataset: {} }, fonts: Object.assign(faces, { ready: decoded.promise }) };
   try {
@@ -23,18 +23,18 @@ test("startup waits for unused shards and decoding, and shares a single preparat
     assert.equal(prepareApplicationFonts(), first);
     const startup = startAfterFonts(() => { started = true; });
     await Promise.resolve();
-    assert.deepEqual(calls, [0, 1, 2]);
+    assert.deepEqual(calls, [0, 1]);
     assert.equal(started, false);
     assert.equal(document.documentElement.dataset.xcssFonts, "pending");
-    shard.resolve();
+    completeFont.resolve();
     await Promise.resolve();
-    assert.equal(started, false, "downloading every shard is insufficient until decoding settles");
+    assert.equal(started, false, "downloading both fonts is insufficient until decoding settles");
     decoded.resolve();
     await startup;
     assert.equal(started, true);
     assert.equal(document.documentElement.dataset.xcssFonts, "ready");
     await prepareApplicationFonts();
-    assert.deepEqual(calls, [0, 1, 2], "navigation must not reload faces");
+    assert.deepEqual(calls, [0, 1], "navigation must not reload faces");
   } finally { globalThis.document = originalDocument; }
 });
 

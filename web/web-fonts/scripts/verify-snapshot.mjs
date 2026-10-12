@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile, readdir } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 
 const root = new URL("./", import.meta.url);
@@ -10,15 +10,17 @@ for (const [name, expected] of Object.entries(provenance.assets)) {
   assert.equal(createHash("sha256").update(bytes).digest("hex"), expected, name);
   if (name.endsWith(".woff2")) {
     assert.equal(bytes.subarray(0, 4).toString(), "wOF2", name);
-    assert.ok(bytes.length <= 256 * 1024, name);
+    assert.ok(bytes.length <= 16 * 1024 * 1024, name);
   }
 }
-const cjk = (await readdir(new URL("cjk/", root))).map(name => `cjk/${name}`).sort();
-assert.deepEqual(cjk, Object.keys(provenance.assets).filter(name => name.startsWith("cjk/")).sort());
+assert.equal(provenance.distribution.mode, "complete-fonts");
+assert.equal(provenance.distribution.unicode_shards, false);
+assert.deepEqual(Object.keys(provenance.assets).filter(name => name.endsWith(".woff2")).sort(), ["MapleMonoFull-Bold.woff2", "MapleMonoFull-Regular.woff2"]);
 const css = await readFile(new URL("fonts.css", root), "utf8");
 assert.ok(css.includes('font-variant-ligatures:none'));
 const faces = [...css.matchAll(/@font-face\{([^}]+)\}/gu)];
-assert.ok(faces.length > 2);
+assert.equal(faces.length, 2);
+assert.ok(!css.includes("unicode-range"));
 for (const [, face] of faces) {
   assert.ok(face.includes("font-display:block;"), "Every font is prepared before the UI is displayed");
 }
@@ -26,16 +28,14 @@ assert.ok(css.includes('"calt" 0,"liga" 0,"clig" 0,"dlig" 0'));
 assert.ok(css.includes('font-style:normal;font-weight:400'));
 assert.ok(css.includes('font-style:normal;font-weight:700'));
 assert.ok(!css.includes('font-weight:100 900'));
-assert.ok(css.includes('MapleMonoNormalNL-Regular.woff2'));
-assert.ok(css.includes('MapleMonoNormalNL-Bold.woff2'));
-assert.ok(css.includes('font-family:"Sarmg Maple Bootstrap"'));
-assert.ok(css.includes('MapleMonoBootstrap-Regular.woff2'));
-assert.ok(css.includes('MapleMonoBootstrap-Bold.woff2'));
-assert.ok(css.includes('--xcss-font-ui:"Sarmg Maple Bootstrap","Sarmg Maple"'));
+assert.ok(css.includes('MapleMonoFull-Regular.woff2'));
+assert.ok(css.includes('MapleMonoFull-Bold.woff2'));
+assert.ok(!css.includes('Bootstrap'));
+assert.ok(css.includes('--xcss-font-ui:"Sarmg Maple"'));
 assert.ok(!css.includes('Italic.woff2'));
 assert.equal(provenance.latin.handwriting, false);
 assert.ok(!css.includes('url("./MapleMono.woff2")'));
-console.log("Default fonts: Normal NL upright Regular/Bold, no ligatures, unchanged CJK coverage");
+console.log("Default fonts: complete upright Regular/Bold, no ligatures or Unicode shards");
 
 const startup = JSON.parse(await readFile(new URL("startup.json", root), "utf8"));
 assert.equal(startup.policy, "all-fonts-before-ui");

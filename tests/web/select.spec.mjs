@@ -200,3 +200,32 @@ test("the first visible popup frame already has all four masked corners and the 
   expect(shadow[0]).toBeLessThan(250); expect(shadow[0]).toBe(shadow[1]); expect(shadow[1]).toBe(shadow[2]);
   await info.attach("first-visible-frame-observations", { body: JSON.stringify(first, null, 2), contentType: "application/json" });
 });
+
+for (const [property, value, reason] of [
+  ["box-shadow", "inset 0 0 2px black", "inset-or-unsupported-shadow"],
+  ["mask-image", "linear-gradient(black, black)", "existing-mask"],
+]) test(`native popup fallback stays usable with ${property}`, async ({ page }) => {
+  await ready(page);
+  const control = page.getByRole("combobox", { name: "Controlled", exact: true });
+  const panel = page.locator(`[id="${await control.getAttribute("aria-controls")}"]`);
+  await panel.evaluate((node, [property, value]) => node.style.setProperty(property, value), [property, value]);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", "not-visible");
+    // A completed fallback from the previous opening must not reveal the
+    // next opening before its current geometry and author style are checked.
+    expect(await control.evaluate(trigger => {
+      trigger.click();
+      return getComputedStyle(document.getElementById(trigger.getAttribute("aria-controls"))).visibility;
+    })).toBe("hidden");
+    await expect(panel).toHaveAttribute("data-xcss-server-corner-state", "fallback");
+    await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", reason);
+    await expect(panel).toBeVisible();
+    await panel.getByRole("option", { name: attempt ? "Alpha" : "Gamma", exact: true }).click();
+    await expect(control).toHaveText(attempt ? /Alpha/ : /Gamma/);
+    await expect(control).toHaveAttribute("aria-expanded", "false");
+  }
+  await panel.evaluate((node, property) => node.style.removeProperty(property), property);
+  await control.click();
+  await expect(panel).toHaveAttribute("data-xcss-server-corner-state", "clip");
+  await expect(panel).toBeVisible();
+});

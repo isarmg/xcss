@@ -20,8 +20,8 @@
   --xcss-server-corner-foreground: 1;
 }
 /* Hidden popovers cannot be measured. Reveal a newly opened panel only once
- * its shared contour and shadow are painted, including the first frame. */
-.xcss-select-panel:popover-open:not([data-xcss-server-corner-state=clip]):not([data-xcss-server-corner-reason=forced-colors]) { visibility: hidden; }
+ * its shared contour is painted or a visible native fallback is ready. */
+.xcss-select-panel:popover-open:not([data-xcss-server-corner-state=clip]):not([data-xcss-server-corner-state=fallback]:not([data-xcss-server-corner-reason=not-visible])) { visibility: hidden; }
 .xcss-select-option {
   display: flex; align-items: center; justify-content: space-between; gap: .75rem;
   min-height: 44px; padding: .5rem max(1rem, var(--xcss-server-corner-text-inset, 26px));

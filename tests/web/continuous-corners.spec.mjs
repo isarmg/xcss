@@ -11,6 +11,127 @@ const ready = async page => {
 const state = (page, id) => page.locator(`#${id}`).getAttribute("data-xcss-server-corner-state");
 const frame = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
+const fractionalControl = async (page, tag = "input") => {
+  await ready(page);
+  await page.evaluate(tag => {
+    const underlay = document.createElement("div");
+    underlay.style.cssText = "position:fixed;inset:0;background:rgb(240,240,240);z-index:999";
+    document.body.append(underlay);
+    const node = document.createElement(tag); node.id = "fractional-control";
+    if (tag === "input") node.value = "Choice";
+    else { node.textContent = "Choice"; node.setAttribute("role", "combobox"); }
+    node.style.cssText = "position:fixed;left:48.25px;top:48.5px;z-index:1000;width:113.375px;height:44.375px;min-height:0;box-sizing:border-box;padding:4px 16px;border:1px solid rgb(100,100,100);background:rgb(210,210,210);color:rgb(70,70,70);font-size:16px;box-shadow:none;outline-style:none;outline-width:3px;--xcss-server-corner-extent:27px;--xcss-server-corner-mode:clip";
+    document.body.append(node);
+  }, tag);
+  const control = page.locator("#fractional-control");
+  await expect(control).toHaveAttribute("data-xcss-server-corner-state", "clip");
+  await frame(page);
+  return control;
+};
+
+test("fractional native inputs and combobox triggers keep the complete curve without a detached right tail", async ({ browser }, info) => {
+  for (const dpr of [1,2]) {
+    const context = await browser.newContext({ baseURL: info.project.use.baseURL, deviceScaleFactor: dpr });
+    const page = await context.newPage();
+    try {
+      for (const tag of ["input", "button"]) {
+        const control = await fractionalControl(page, tag);
+        for (const zoom of [1,1.25]) for (const [width, height] of [[113.375,44.375], [180.225,37.475]]) {
+          await page.evaluate(({zoom, width, height}) => {
+            document.body.style.zoom = String(zoom);
+            const node = document.querySelector("#fractional-control");
+            node.style.width = `${width}px`; node.style.height = `${height}px`;
+          }, {zoom, width, height});
+          await control.focus(); await frame(page);
+          const samples = await control.evaluate(node => {
+            const css = getComputedStyle(node), width = Number.parseFloat(css.width), height = Number.parseFloat(css.height);
+            const geometry = window.createServerCornerGeometry({ width, height, extent: 27, tolerance: .02 });
+            // Sample the certified curve itself, so clipping away the normal
+            // grey border cannot masquerade as removing the stray paint.
+            const points = geometry.corners.flatMap(corner => [.3,.5,.7].map(parameter => {
+              const q = corner.points.reduce((best, q) => Math.abs(q.parameter - parameter) < Math.abs(best.parameter - parameter) ? q : best);
+              return { x: q.x, y: q.y, nx: -Math.sin(q.heading), ny: Math.cos(q.heading) };
+            }));
+            points.push({x: width / 2, y: 0, nx: 0, ny: 1}, {x: width, y: height / 2, nx: -1, ny: 0},
+              {x: width / 2, y: height, nx: 0, ny: -1}, {x: 0, y: height / 2, nx: 1, ny: 0});
+            return points;
+          });
+          const box = await control.boundingBox(), clip = { x: Math.floor(box.x) - 16, y: Math.floor(box.y) - 16,
+            width: Math.ceil(box.x + box.width) + 16 - (Math.floor(box.x) - 16), height: Math.ceil(box.y + box.height) + 16 - (Math.floor(box.y) - 16) };
+          const png = await page.screenshot({ path: info.outputPath(`native-curve-${tag}-dpr${dpr}-zoom${zoom}-${width}.png`), clip });
+          const point = (x, y) => [Math.floor((box.x - clip.x + x * zoom) * dpr), Math.floor((box.y - clip.y + y * zoom) * dpr)];
+          // At DPR1 a diagonal 1px stroke may fall between the two pixels
+          // crossed by its exact normal. Include neighbouring tangent samples
+          // without moving the strip away from the certified curve.
+          const borderPoints = samples.flatMap(q => [-.5,0,.5].flatMap(tangent => Array.from({length: 17}, (_, n) => {
+            const distance = -1 + n / 8;
+            return point(q.x + q.nx * distance + q.ny * tangent, q.y + q.ny * distance - q.nx * tangent);
+          })));
+          // Across every central/corner row the painted shape must remain
+          // connected. The old nine-slice paint leaves a second dark pixel
+          // after a fully background-coloured gap on the right-hand curve.
+          const edge = (box.x + box.width - clip.x) * dpr, scanlines = [];
+          for (let y = Math.ceil((box.y - clip.y + box.height * .15) * dpr); y < (box.y - clip.y + box.height * .85) * dpr; y++) {
+            scanlines.push({ y, points: Array.from({length: Math.ceil((31 * zoom + 8) * dpr)}, (_, n) => [Math.floor(edge - 31 * zoom * dpr) + n, y]) });
+          }
+          const colors = pngPixels(png, [...borderPoints, ...scanlines.flatMap(row => row.points)]).map(color => color[0]);
+          const border = samples.map((_, index) => Math.min(...colors.slice(index * 51, (index + 1) * 51)));
+          let offset = borderPoints.length;
+          const rows = scanlines.map(row => {
+            const pixels = colors.slice(offset, offset + row.points.length); offset += row.points.length;
+            const gap = pixels.findIndex(color => color >= 238);
+            return {y: row.y, detached: gap >= 0 && pixels.slice(gap + 1).some(color => color < 230)};
+          });
+          await info.attach(`native-border-${tag}-dpr${dpr}-zoom${zoom}-${width}`, { body: JSON.stringify({box, border, detachedRows: rows.filter(row => row.detached)}), contentType: "application/json" });
+          for (const color of border) expect(color, `visible grey curve ${tag}, DPR${dpr}, zoom${zoom}`).toBeLessThan(185);
+          expect(rows.filter(row => row.detached), `no separated right edge ${tag}, DPR${dpr}, zoom${zoom}`).toEqual([]);
+          await expect(control).toHaveCSS("border-image-source", "none");
+          await expect(control).toHaveCSS("mask-clip", "border-box");
+        }
+      }
+    } finally { await context.close(); }
+  }
+});
+
+test("native control exact paint preserves outside shadows, visible outlines and released author styles", async ({ page }, info) => {
+  const control = await fractionalControl(page);
+  await expect(control).toHaveCSS("outline-style", "none");
+  await expect(control).toHaveCSS("mask-clip", "border-box");
+  await control.evaluate(node => {
+    // These are valid latent background declarations even without an image.
+    node.style.backgroundSize = "31px 23px"; node.style.backgroundPosition = "13px 17px";
+    node.style.backgroundRepeat = "repeat-x"; node.style.backgroundAttachment = "fixed";
+    node.style.backgroundOrigin = "padding-box"; node.style.backgroundClip = "content-box"; node.style.backgroundBlendMode = "multiply";
+  });
+  await frame(page);
+  const outsidePixel = async name => {
+    const box = await control.boundingBox(), clip = {x: Math.floor(box.x) - 16, y: Math.floor(box.y) - 16, width: Math.ceil(box.width) + 34, height: Math.ceil(box.height) + 34};
+    const png = await page.screenshot({path: info.outputPath(`native-outside-${name}.png`), clip});
+    return pngPixels(png, [[Math.floor(box.x + box.width + 4 - clip.x), Math.floor(box.y + box.height / 2 - clip.y)]])[0];
+  };
+  await control.evaluate(node => { node.style.boxShadow = "0 0 6px rgb(255,0,0)"; }); await frame(page);
+  await expect(control).toHaveCSS("mask-clip", "no-clip");
+  await expect(control).not.toHaveCSS("border-image-source", "none");
+  const shadow = await outsidePixel("shadow");
+  expect(shadow[0]).toBeGreaterThan(shadow[1]); expect(shadow[1]).toBeLessThan(235);
+  await control.evaluate(node => { node.style.boxShadow = "none"; node.style.outline = "3px solid rgb(0,0,255)"; node.style.outlineOffset = "3px"; }); await frame(page);
+  await expect(control).toHaveCSS("mask-clip", "no-clip");
+  expect(await outsidePixel("outline")).toEqual([0,0,255,255]);
+  await control.evaluate(node => { node.style.outlineStyle = "none"; node.style.backgroundImage = "linear-gradient(white,black)"; }); await frame(page);
+  await expect(control).toHaveAttribute("data-xcss-server-corner-reason", "native-background-image-or-backdrop");
+  await expect(control).toHaveCSS("mask-image", "none");
+  await control.evaluate(node => { node.style.backgroundImage = "none"; }); await frame(page);
+  await expect(control).toHaveAttribute("data-xcss-server-corner-state", "clip");
+  await expect(control).toHaveCSS("mask-clip", "border-box");
+  const box = await control.boundingBox();
+  await page.evaluate(() => window.serverCorners.stop());
+  expect(await control.boundingBox()).toEqual(box);
+  await expect(control).not.toHaveAttribute("data-xcss-server-corner-state");
+  for (const [name, value] of Object.entries({"background-image": "none", "background-color": "rgb(210, 210, 210)", "border-image-source": "none", "mask-image": "none", "border-top-color": "rgb(100, 100, 100)", "background-size": "31px 23px", "background-position": "13px 17px", "background-repeat": "repeat-x", "background-attachment": "fixed", "background-origin": "padding-box", "background-clip": "content-box", "background-blend-mode": "multiply"})) {
+    await expect(control).toHaveCSS(name, value);
+  }
+});
+
 const dropdownFrame = async page => {
   await ready(page);
   await page.evaluate(() => {

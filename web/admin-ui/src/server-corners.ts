@@ -15,7 +15,7 @@ const transitionNames = ["transition-property", "transition-duration", "transiti
 const ownedPaintProperty = (name: string) => /^(?:background(?:-|$)|border(?:-|$)|box-shadow$|mask(?:-|$)|backdrop-filter$)/.test(name);
 const paintCache = new WeakMap<ServerCornerGeometry, Map<string, { image: string; margin: number; slice?: number } | null>>();
 function snapshot(css: CSSStyleDeclaration): CSSStyleDeclaration {
-  const properties = ["width", "height", "box-sizing", "display", "position", "overflow-x", "overflow-y", "border-image-source", "box-shadow", "background-color", "background-image", "backdrop-filter", "mask-image", "outline-width", "outline-offset", "--xcss-server-corner-extent", "--xcss-server-corner-mode", "--xcss-server-corner-foreground"];
+  const properties = ["width", "height", "box-sizing", "display", "position", "overflow-x", "overflow-y", "border-image-source", "box-shadow", "background-color", "background-image", "backdrop-filter", "mask-image", "outline-style", "outline-width", "outline-offset", "--xcss-server-corner-extent", "--xcss-server-corner-mode", "--xcss-server-corner-foreground"];
   for (const side of ["top", "right", "bottom", "left"]) properties.push(`padding-${side}`, `border-${side}-width`);
   const values = Object.fromEntries(properties.map(name => [name, css.getPropertyValue(name)]));
   for (const side of ["top", "right", "bottom", "left"]) {
@@ -322,6 +322,14 @@ export function startServerCorners(document: Document): ServerCornersController 
       const record = state(node);
       const paintedUrl = imageUrl(painted.image);
       const borderWidths = ["top", "right", "bottom", "left"].map(side => css.getPropertyValue(`border-${side}-width`));
+      const visibleOutline = number(css.outlineWidth) > 0 && !["none", "hidden"].includes(css.outlineStyle);
+      // Fractional native controls can leave a second right edge when the
+      // full SVG is resampled through border-image and its outset is admitted
+      // by the mask's white exterior. Paint that same SVG at its exact size
+      // inside the border box instead. Real outside shadows/outlines retain
+      // the existing outset renderer and no-clip mask.
+      const exactControl = ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(node.tagName) &&
+        !backgroundChild && !foreground && layers.length === 0 && !visibleOutline && borderWidths.some(value => number(value) > 0);
       if (foregroundPath) {
         let child = record.foreground;
         if (!child) {
@@ -377,15 +385,23 @@ export function startServerCorners(document: Document): ServerCornersController 
         put(node, `border-${side}-style`, "solid");
         put(node, `border-${side}-color`, "transparent");
       }
-      put(node, "border-image-source", paintedUrl);
+      if (exactControl) {
+        put(node, "background-image", paintedUrl);
+        put(node, "background-size", `${fmt(width + painted.margin * 2)}px ${fmt(height + painted.margin * 2)}px`);
+        put(node, "background-position", `${-painted.margin}px ${-painted.margin}px`);
+        put(node, "background-repeat", "no-repeat"); put(node, "background-attachment", "scroll");
+        put(node, "background-origin", "border-box"); put(node, "background-clip", "border-box");
+        put(node, "background-blend-mode", "normal");
+      }
+      put(node, "border-image-source", exactControl ? "none" : paintedUrl);
       put(node, "border-image-slice", `${painted.slice ?? painted.margin} fill`);
       put(node, "border-image-width", `${painted.slice ?? painted.margin}px`);
-      put(node, "border-image-outset", `${painted.margin}px`);
+      put(node, "border-image-outset", exactControl ? "0" : `${painted.margin}px`);
       put(node, "border-image-repeat", "stretch");
       if (clipping) {
         const margin = Math.max(painted.margin, Math.ceil(number(css.outlineWidth) + Math.abs(number(css.outlineOffset)) + 4));
         put(node, "mask-image", imageUrl(mask(geometry, margin)));
-        put(node, "mask-clip", "no-clip"); put(node, "mask-origin", "border-box");
+        put(node, "mask-clip", exactControl ? "border-box" : "no-clip"); put(node, "mask-origin", "border-box");
         put(node, "mask-size", `${fmt(width + margin * 2)}px ${fmt(height + margin * 2)}px`);
         put(node, "mask-position", `${-margin}px ${-margin}px`); put(node, "mask-repeat", "no-repeat");
       }

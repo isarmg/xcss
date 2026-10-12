@@ -325,3 +325,54 @@ test("nested surfaces keep their own uniform corners when the parent and spacing
   await expect(page.locator("#independent-child")).toHaveCSS("border-radius", "0px");
   expect(await state(page, "independent-child")).toBeNull();
 });
+
+for (const change of ["value", "important", "remove"]) {
+  for (const finish of ["stop", "refresh", "recover"]) {
+    test(`author background ${change} during fallback survives ${finish}`, async ({ page }) => {
+      await ready(page);
+      const panel = page.locator("#panel");
+      await panel.evaluate(el => el.style.setProperty("background-color", "rgb(1, 2, 3)", "important"));
+      await frame(page);
+      await page.emulateMedia({ forcedColors: "active" });
+      await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", "forced-colors");
+      const value = change === "remove" ? "" : "rgb(9, 8, 7)";
+      const priority = change === "important" ? "important" : "";
+      await panel.evaluate((el, { value, priority, finish }) => {
+        el.style.setProperty("background-color", value, priority);
+        // Stop in the same task, before MutationObserver can process the edit.
+        if (finish === "stop") window.serverCorners.stop();
+        else window.serverCorners.refresh();
+      }, { value, priority, finish });
+      if (finish !== "stop") {
+        await frame(page);
+        expect(await panel.evaluate(el => el.style.backgroundColor)).toBe(value);
+        if (finish === "recover") {
+          await page.emulateMedia({ forcedColors: "none" });
+          await expect(panel).toHaveAttribute("data-xcss-server-corner-state", "paint");
+          await page.evaluate(() => window.serverCorners.refresh());
+          await frame(page);
+        }
+        await page.evaluate(() => window.serverCorners.stop());
+      }
+      expect(await panel.evaluate(el => [el.style.backgroundColor, el.style.getPropertyPriority("background-color")])).toEqual([value, priority]);
+    });
+  }
+}
+
+test("released transition declarations follow subsequent author edits", async ({ page }) => {
+  await ready(page);
+  const panel = page.locator("#panel");
+  await panel.evaluate(el => { el.style.transitionProperty = "background-color, opacity"; el.style.transitionDuration = "0.3s"; });
+  await frame(page);
+  expect(await panel.evaluate(el => el.style.transitionProperty)).toBe("opacity");
+  await panel.evaluate(el => el.style.transitionProperty = "transform");
+  await frame(page);
+  await panel.evaluate(el => el.style.transitionProperty = "width");
+  await frame(page);
+  expect(await panel.evaluate(el => el.style.transitionProperty)).toBe("width");
+  await panel.evaluate(el => el.style.transitionProperty = "background-color, height");
+  await frame(page);
+  expect(await panel.evaluate(el => el.style.transitionProperty)).toBe("height");
+  await page.evaluate(() => window.serverCorners.stop());
+  expect(await panel.evaluate(el => el.style.transitionProperty)).toBe("background-color, height");
+});

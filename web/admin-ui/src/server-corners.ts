@@ -161,7 +161,8 @@ export function startServerCorners(document: Document): ServerCornersController 
       for (const [name, saved] of record.saved) {
         if (!final && transitionNames.includes(name)) continue;
         const value = element.style.getPropertyValue(name), priority = element.style.getPropertyPriority(name);
-        if (saved.applied !== undefined && (value !== saved.applied || priority !== "important")) { saved.value = value; saved.priority = priority; }
+        // Once released, the current inline declaration belongs to the author.
+        if (saved.applied === undefined || value !== saved.applied || priority !== "important") { saved.value = value; saved.priority = priority; }
         if (saved.value) draftStyle.setProperty(name, saved.value, saved.priority); else draftStyle.removeProperty(name);
         saved.applied = undefined;
       }
@@ -187,7 +188,7 @@ export function startServerCorners(document: Document): ServerCornersController 
       for (const name of transitionNames) {
         const saved = previous.saved.get(name); if (!saved) continue;
         const current = element.style.getPropertyValue(name), priority = element.style.getPropertyPriority(name);
-        if (saved.applied !== undefined && (current !== saved.applied || priority !== "important")) { saved.value = current; saved.priority = priority; }
+        if (saved.applied === undefined || current !== saved.applied || priority !== "important") { saved.value = current; saved.priority = priority; }
         if (saved.value) draftStyle.setProperty(name, saved.value, saved.priority); else draftStyle.removeProperty(name);
         saved.applied = undefined;
       }

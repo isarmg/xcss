@@ -7,8 +7,11 @@ import { useContext, useId, useRef, useState, type FormEvent } from "react";
 type Failure = { message: string; field?: string };
 
 export type AccountSettingsProps = {
-  client?: AdministratorApiClient; username?: string; onUpdated?(): void;
   onNavigate?(): void; href?: string;
+};
+
+export type AccountPageProps = {
+  client?: AdministratorApiClient; username?: string; onUpdated?(): void;
 };
 
 /** The account menu entry has no selected state, even while its page is open. */
@@ -24,7 +27,7 @@ export function AccountSettings({ onNavigate, href = "#account" }: AccountSettin
 }
 
 /** Ordinary route content; explicit props also support custom product shells. */
-export function AccountPage({ client: explicitClient, username: explicitUsername, onUpdated }: AccountSettingsProps = {}) {
+export function AccountPage({ client: explicitClient, username: explicitUsername, onUpdated }: AccountPageProps = {}) {
   const application = useContext(Context);
   const client = explicitClient ?? application?.client;
   const username = explicitUsername ?? application?.session.username;

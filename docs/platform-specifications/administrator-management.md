@@ -7,7 +7,7 @@ xcss 管理面只有一个活动管理员。唯一浏览器账户修改接口是
 {"username":"admin","current_password":"current password","new_password":"new password"}
 ```
 
-即使只改用户名，也必须验证当前密码。`new_password` 省略或空字符串表示保留密码。
+即使只改用户名，也必须验证当前密码。省略 `new_password` 表示保留密码；显式提供时必须是符合当前密码策略的非空字符串，空字符串和 `null` 都会被拒绝。
 成功为 204；账户 ID 不变，会话版本递增，该账户全部会话失效，并原子写入账户更新和会话撤销审计。
 客户端用 `updateAccount()` 调用；更新后重新登录。
 

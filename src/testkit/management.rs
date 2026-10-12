@@ -65,6 +65,8 @@ where
     for body in [
         r#"{"username":"secondary","password":"another correct password","role":"admin"}"#,
         r#"{"username":"secondary","username":"other","password":"another correct password"}"#,
+        r#"{"username":"admin","current_password":"correct horse battery","new_password":""}"#,
+        r#"{"username":"admin","current_password":"correct horse battery","new_password":null}"#,
     ] {
         assert_error(
             send(authorized(Method::POST, ADMIN_ACCOUNT_PATH, body)).await,

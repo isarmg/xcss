@@ -391,6 +391,19 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn explicit_empty_password_does_not_update_or_revoke_the_account() {
+        let f = fixture().await;
+        let before = logical_snapshot(f.service.store().pool()).await;
+        assert!(matches!(
+            f.service
+                .update_own_account(&f.context, "renamed", "correct horse battery", Some(""))
+                .await,
+            Err(ManagementError::InvalidInput)
+        ));
+        assert_eq!(logical_snapshot(f.service.store().pool()).await, before);
+    }
+
+    #[tokio::test]
     async fn own_account_update_is_atomic_and_keeps_identity() {
         let f = fixture().await;
         let original = f.context.identity.administrator_id.clone();

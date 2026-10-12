@@ -101,7 +101,7 @@ impl<Store: AdministratorStore + 'static> AdministratorService<Store> {
                 .map_err(|_| ManagementError::Busy)?;
             return Err(ManagementError::InvalidCurrentPassword);
         }
-        let password_hash = match new_password.filter(|value| !value.is_empty()) {
+        let password_hash = match new_password {
             Some(value) => Some(self.management_password_hash(value).await?),
             None => None,
         };

@@ -28,3 +28,15 @@ test("self-service waits for restore, uses its session CSRF and revokes local au
   assert.equal(client.currentSession(), null);
   await assert.rejects(client.updateAccount({ username: "admin", current_password: "secret\ntext" }));
 });
+
+test("empty or null new passwords are rejected before HTTP; retention requires omission", async () => {
+  let requests = 0;
+  const client = createAdministratorApiClient({ baseUrl: "http://127.0.0.1", fetchImpl: async () => {
+    requests++;
+    throw new Error("Invalid account input must not reach HTTP");
+  } });
+  for (const new_password of ["", null]) {
+    await assert.rejects(client.updateAccount({ username: "admin", current_password: "correct horse battery", new_password }), TypeError);
+  }
+  assert.equal(requests, 0);
+});

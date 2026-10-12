@@ -192,7 +192,7 @@ function AdminShell({ options, client }: { options: AdminApplicationOptions; cli
       </div></div></div><div className="xcss-header-actions" role="group" aria-label={t("全局操作", "Global actions")}>
         <div ref={setHeaderActions} style={{ display: "contents" }} /><LanguageToggle /><ThemeToggle />
         <IconButton disabled={logoutPending} aria-label={logoutPending ? t("正在退出…", "Signing out…") : t("退出", "Sign out")} title={logoutPending ? t("正在退出…", "Signing out…") : t("退出", "Sign out")} onClick={() => void logout()}>{workspace.headerControls === "icons" ? <WorkspaceIcon name="logout" /> : t("退出", "Sign out")}</IconButton>
-        <AccountSettings client={client} username={session.session.username} onUpdated={() => setAccountUpdated(true)} />
+        <AccountSettings />
       </div></PageHeader>
       {toasts.length > 0 && <div className="xcss-toast-stack" role="region" aria-label={t("通知", "Notifications")}>{toasts.map(toast =>
         <Toast key={toast.id}><span>{toast.message}</span>

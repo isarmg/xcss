@@ -6,7 +6,7 @@ export type { ServerCornerGeometry, ServerCornerOptions, ServerCornerPoint, Serv
 export interface ServerCornersController { refresh(): void; stop(): void }
 const controllers = new WeakMap<Document, ServerCornersController>();
 type Saved = { value: string; priority: string; applied?: string };
-type RecordState = { saved: Map<string, Saved>; pending: Map<string, string>; transitionDirty: boolean; originalState: string | null; originalReason: string | null; decoration?: HTMLDivElement; restoredStyle?: string; appliedStyle?: string; appliedPaint?: Map<string, string> };
+type RecordState = { saved: Map<string, Saved>; pending: Map<string, string>; transitionDirty: boolean; originalState: string | null; originalReason: string | null; decoration?: HTMLDivElement; foreground?: SVGSVGElement; restoredStyle?: string; appliedStyle?: string; appliedPaint?: Map<string, string> };
 type Shadow = { color: string; x: number; y: number; blur: number; spread: number };
 const xml = (s: string) => s.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[c]!);
 const number = (s: string) => Number.parseFloat(s) || 0;
@@ -15,7 +15,7 @@ const transitionNames = ["transition-property", "transition-duration", "transiti
 const ownedPaintProperty = (name: string) => /^(?:background(?:-|$)|border(?:-|$)|box-shadow$|mask(?:-|$)|backdrop-filter$)/.test(name);
 const paintCache = new WeakMap<ServerCornerGeometry, Map<string, { image: string; margin: number; slice?: number } | null>>();
 function snapshot(css: CSSStyleDeclaration): CSSStyleDeclaration {
-  const properties = ["width", "height", "box-sizing", "display", "position", "overflow-x", "overflow-y", "border-image-source", "box-shadow", "background-color", "background-image", "backdrop-filter", "mask-image", "outline-width", "outline-offset", "--xcss-server-corner-extent", "--xcss-server-corner-mode"];
+  const properties = ["width", "height", "box-sizing", "display", "position", "overflow-x", "overflow-y", "border-image-source", "box-shadow", "background-color", "background-image", "backdrop-filter", "mask-image", "outline-width", "outline-offset", "--xcss-server-corner-extent", "--xcss-server-corner-mode", "--xcss-server-corner-foreground"];
   for (const side of ["top", "right", "bottom", "left"]) properties.push(`padding-${side}`, `border-${side}-width`);
   const values = Object.fromEntries(properties.map(name => [name, css.getPropertyValue(name)]));
   for (const side of ["top", "right", "bottom", "left"]) {
@@ -57,13 +57,13 @@ function mask(geometry: ServerCornerGeometry, margin: number) {
   // The fixed host mask clips scaled/replaced children in host coordinates.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(sw)}" height="${fmt(sh)}"><path d="M0 0H${fmt(sw)}V${fmt(sh)}H0ZM${margin} ${margin}H${fmt(w + margin)}V${fmt(h + margin)}H${margin}Z" fill="white" fill-rule="evenodd"/><path transform="translate(${margin} ${margin})" d="${geometry.path}" fill="white"/></svg>`;
 }
-function decoration(geometry: ServerCornerGeometry, css: CSSStyleDeclaration, layers: Shadow[], hasBackgroundImage: boolean): { image: string; margin: number; slice?: number } | null {
+function decoration(geometry: ServerCornerGeometry, css: CSSStyleDeclaration, layers: Shadow[], hasBackgroundImage: boolean, foreground = false): { image: string; margin: number; slice?: number } | null {
   const { width: w, height: h, extent: e } = geometry;
   const sides = ["top", "right", "bottom", "left"];
   const widths = sides.map(side => number(css.getPropertyValue(`border-${side}-width`)));
   const colors = sides.map(side => css.getPropertyValue(`border-${side}-color`));
   const styles = sides.map(side => css.getPropertyValue(`border-${side}-style`));
-  const key = JSON.stringify([widths, colors, styles, css.boxShadow, css.backgroundColor, hasBackgroundImage]);
+  const key = JSON.stringify([widths, colors, styles, css.boxShadow, css.backgroundColor, hasBackgroundImage, foreground]);
   let cache = paintCache.get(geometry); if (!cache) { cache = new Map(); paintCache.set(geometry, cache); }
   if (cache.has(key)) return cache.get(key)!;
   if (styles.some((style, i) => widths[i] > 0 && !["solid", "dashed", "dotted", "none"].includes(style))) return null;
@@ -95,7 +95,7 @@ function decoration(geometry: ServerCornerGeometry, css: CSSStyleDeclaration, la
     `0,${h} ${w},${h} ${w - brx},${h - bry} ${blx},${h - bly}`,
     `0,0 ${tlx},${tly} ${blx},${h - bly} 0,${h}`];
   for (let i = 0; i < sides.length; i++) {
-    if (widths[i] === 0 || styles[i] === "none") continue;
+    if (foreground || widths[i] === 0 || styles[i] === "none") continue;
     defs += `<clipPath id="side${i}"><polygon points="${polygons[i]}"/></clipPath>`;
     const dash = styles[i] === "dashed" ? ` stroke-dasharray="${widths[i] * 3} ${widths[i] * 2}"` : styles[i] === "dotted" ? ` stroke-dasharray="0 ${widths[i] * 2}" stroke-linecap="round"` : "";
     body += `<g clip-path="url(#inside)"><path d="${geometry.path}" fill="none" stroke="${xml(colors[i])}" stroke-width="${widths[i] * 2}" clip-path="url(#side${i})"${dash}/></g>`;
@@ -117,6 +117,7 @@ export function startServerCorners(document: Document): ServerCornersController 
   for (const registration of [
     { name: "--xcss-server-corner-extent", syntax: "<length-percentage>", inherits: false, initialValue: "0px" },
     { name: "--xcss-server-corner-mode", syntax: "*", inherits: false, initialValue: "paint" },
+    { name: "--xcss-server-corner-foreground", syntax: "<number>", inherits: false, initialValue: "0" },
   ]) {
     try { view.CSS.registerProperty(registration); }
     catch (error) {
@@ -169,8 +170,10 @@ export function startServerCorners(document: Document): ServerCornersController 
     }
     record.pending.clear();
     if (record.decoration) record.decoration.style.display = "none";
+    if (record.foreground) record.foreground.style.setProperty("display", "none", "important");
     if (final) {
       record.decoration?.remove();
+      record.foreground?.remove();
       for (const [name, value] of [["data-xcss-server-corner-state", record.originalState], ["data-xcss-server-corner-reason", record.originalReason]]) {
         if (value === null) element.removeAttribute(name!); else element.setAttribute(name!, value!);
       }
@@ -220,6 +223,19 @@ export function startServerCorners(document: Document): ServerCornersController 
     state(element); element.setAttribute("data-xcss-server-corner-state", status);
     if (reason) element.setAttribute("data-xcss-server-corner-reason", reason); else element.removeAttribute("data-xcss-server-corner-reason");
   };
+  const positionForeground = (element: HTMLElement, foreground: SVGSVGElement) => {
+    // A fixed child remains in its popover/modal stacking context but does not
+    // scroll with the panel's option content. Its SVG screen matrix also lets
+    // us position it in a transformed ancestor's containing-block coordinates.
+    const matrix = foreground.getScreenCTM(); if (!matrix) return;
+    const determinant = matrix.a * matrix.d - matrix.b * matrix.c;
+    if (!Number.isFinite(determinant) || Math.abs(determinant) < 1e-12) return;
+    const box = element.getBoundingClientRect(), { width, height } = foreground.viewBox.baseVal;
+    const x = box.left - Math.min(0, matrix.a * width) - Math.min(0, matrix.c * height) - matrix.e;
+    const y = box.top - Math.min(0, matrix.b * width) - Math.min(0, matrix.d * height) - matrix.f;
+    foreground.style.setProperty("left", `${fmt(number(foreground.style.left) + (matrix.d * x - matrix.c * y) / determinant)}px`, "important");
+    foreground.style.setProperty("top", `${fmt(number(foreground.style.top) + (matrix.a * y - matrix.b * x) / determinant)}px`, "important");
+  };
   const forced = view.matchMedia("(forced-colors: active)");
   const colorScheme = view.matchMedia("(prefers-color-scheme: dark)");
   const observer = new view.MutationObserver(() => { for (const record of records.values()) record.transitionDirty = true; schedule(); });
@@ -238,7 +254,7 @@ export function startServerCorners(document: Document): ServerCornersController 
       if (record.decoration) record.decoration.style.display = "none";
     }
     const selected = new Set<HTMLElement>();
-    type Candidate = { node: HTMLElement; css: CSSStyleDeclaration; width: number; height: number; fragmented: boolean };
+    type Candidate = { node: HTMLElement; css: CSSStyleDeclaration; width: number; height: number; fragmented: boolean; visible: boolean };
     const candidates: Candidate[] = [];
     // Read every candidate before paint writes, avoiding a style/layout flush
     // per tile in large galleries. Unselected descendants inherit extent=0.
@@ -260,13 +276,17 @@ export function startServerCorners(document: Document): ServerCornersController 
       // Definite CSS dimensions already describe the untransformed border box.
       // Avoid a bounding-box read per tile in ordinary block galleries. Keep
       // the fragment check for both inline content and multi-column blocks.
-      candidates.push({ node, css, width: measuredDimension("width"), height: measuredDimension("height"), fragmented: node.getClientRects().length > 1 });
+      const fragments = node.getClientRects().length;
+      candidates.push({ node, css, width: measuredDimension("width"), height: measuredDimension("height"), fragmented: fragments > 1, visible: fragments > 0 });
     }
-    for (const { node, css, width, height, fragmented } of candidates) {
+    for (const { node, css, width, height, fragmented, visible } of candidates) {
       const raw = node.getAttribute("data-xcss-server-corner-extent") ?? css.getPropertyValue("--xcss-server-corner-extent").trim();
       const mode = node.getAttribute("data-xcss-server-corner") ?? css.getPropertyValue("--xcss-server-corner-mode").trim();
       if (mode === "none" || number(raw) <= 0) continue;
       selected.add(node); resize.observe(node);
+      // A closed dropdown can retain definite CSS dimensions. It must lose
+      // readiness even though those values remain positive while display:none.
+      if (number(css.getPropertyValue("--xcss-server-corner-foreground")) > 0 && !visible) { mark(node, "fallback", "not-visible"); continue; }
       if (forced.matches || width <= 0 || height <= 0 || ["table", "table-row", "table-cell"].includes(css.display) || fragmented) { mark(node, "fallback", forced.matches ? "forced-colors" : width <= 0 || height <= 0 ? "not-visible" : fragmented ? "fragmented-inline" : "table-layout"); continue; }
       if (css.borderImageSource !== "none" || css.maskImage !== "none") { mark(node, "fallback", css.maskImage !== "none" ? "existing-mask" : "existing-border-image"); continue; }
       const extent = raw.endsWith("%") ? number(raw) * Math.min(width, height) / 100 : number(raw);
@@ -281,13 +301,42 @@ export function startServerCorners(document: Document): ServerCornersController 
       const media = ["IMG", "VIDEO", "CANVAS"].includes(node.tagName);
       // Native/replaced controls cannot receive a background child safely.
       if (backgroundChild && ["INPUT", "TEXTAREA", "SELECT", "IMG", "VIDEO", "CANVAS"].includes(node.tagName) && !media) { mark(node, "fallback", "native-background-image-or-backdrop"); continue; }
+      const clipping = mode === "clip" || css.overflowX === "hidden" || css.overflowX === "clip" || css.overflowY === "hidden" || css.overflowY === "clip";
+      const borderWidth = number(css.getPropertyValue("border-top-width"));
+      // Opt-in dropdown frames have one solid border. Keep all existing
+      // unequal/dashed/native surface behavior outside this narrow contract.
+      const foreground = number(css.getPropertyValue("--xcss-server-corner-foreground")) > 0 && clipping && borderWidth > 0 &&
+        !["INPUT", "TEXTAREA", "SELECT", "IMG", "VIDEO", "CANVAS"].includes(node.tagName) &&
+        ["top", "right", "bottom", "left"].every(side => css.getPropertyValue(`border-${side}-style`) === "solid" &&
+          number(css.getPropertyValue(`border-${side}-width`)) === borderWidth && css.getPropertyValue(`border-${side}-color`) === css.getPropertyValue("border-top-color"));
+      let foregroundPath: string | undefined;
+      if (foreground) {
+        try { foregroundPath = geometry.path + offsetServerCornerPath(geometry, -borderWidth); }
+        catch { mark(node, "fallback", "invalid-foreground-inset"); continue; }
+      }
       let painted: ReturnType<typeof decoration>;
-      try { painted = decoration(geometry, css, layers, backgroundChild && !media); }
+      try { painted = decoration(geometry, css, layers, backgroundChild && !media, foreground); }
       catch { mark(node, "fallback", "invalid-paint-geometry"); continue; }
       if (!painted) { mark(node, "fallback", "unsupported-border-or-shadow-inset"); continue; }
       const record = state(node);
       const paintedUrl = imageUrl(painted.image);
       const borderWidths = ["top", "right", "bottom", "left"].map(side => css.getPropertyValue(`border-${side}-width`));
+      if (foregroundPath) {
+        let child = record.foreground;
+        if (!child) {
+          child = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+          child.setAttribute("data-xcss-server-corner-decoration", "foreground");
+          child.setAttribute("aria-hidden", "true"); child.setAttribute("focusable", "false");
+          child.append(document.createElementNS("http://www.w3.org/2000/svg", "path"));
+          record.foreground = child;
+        }
+        if (child.parentNode !== node || node.lastElementChild !== child) node.append(child);
+        child.setAttribute("viewBox", `0 0 ${fmt(width)} ${fmt(height)}`);
+        child.style.cssText = `all:initial!important;display:block!important;position:fixed!important;left:0!important;top:0!important;width:${fmt(width)}px!important;height:${fmt(height)}px!important;max-width:none!important;max-height:none!important;pointer-events:none!important;visibility:inherit!important;z-index:2147483647!important;overflow:visible!important;`;
+        const path = child.firstElementChild as SVGPathElement;
+        path.setAttribute("d", foregroundPath);
+        path.style.cssText = `fill:${css.getPropertyValue("border-top-color")}!important;fill-rule:evenodd!important;stroke:none!important;`;
+      }
       if (backgroundChild && !media) {
         let child = record.decoration;
         if (!child) { child = document.createElement("div"); child.setAttribute("data-xcss-server-corner-decoration", ""); child.setAttribute("aria-hidden", "true"); record.decoration = child; }
@@ -332,7 +381,6 @@ export function startServerCorners(document: Document): ServerCornersController 
       put(node, "border-image-width", `${painted.slice ?? painted.margin}px`);
       put(node, "border-image-outset", `${painted.margin}px`);
       put(node, "border-image-repeat", "stretch");
-      const clipping = mode === "clip" || css.overflowX === "hidden" || css.overflowX === "clip" || css.overflowY === "hidden" || css.overflowY === "clip";
       if (clipping) {
         const margin = Math.max(painted.margin, Math.ceil(number(css.outlineWidth) + Math.abs(number(css.outlineOffset)) + 4));
         put(node, "mask-image", imageUrl(mask(geometry, margin)));
@@ -367,6 +415,9 @@ export function startServerCorners(document: Document): ServerCornersController 
       for (const name of record.pending.keys()) record.saved.get(name)!.applied = element.style.getPropertyValue(name);
       record.pending.clear();
     }
+    // Backdrop/paint overrides can change an ancestor's fixed containing
+    // block. Position only after every pending host style has been committed.
+    for (const [element, record] of records) if (record.foreground?.isConnected && record.foreground.style.display !== "none") positionForeground(element, record.foreground);
     // Styles have been restored/replaced before unused URLs are revoked.
     // Keep at most 96 inactive SVGs for hover/theme reuse, plus live images.
     let inactive = [...imageUrls.keys()].filter(source => !usedImages.has(source));
@@ -379,8 +430,13 @@ export function startServerCorners(document: Document): ServerCornersController 
     observe(); if (activeExtentTransitions.size > 0) schedule();
   }
   function schedule() { if (!stopped && !frame) frame = view.requestAnimationFrame(update); }
-  const events = ["pointerover", "pointerout", "pointerdown", "pointerup", "focusin", "focusout", "keydown", "keyup", "change", "input", "load", "DOMContentLoaded", "scroll"];
+  const events = ["pointerover", "pointerout", "pointerdown", "pointerup", "focusin", "focusout", "keydown", "keyup", "change", "input", "load", "DOMContentLoaded", "scroll", "beforetoggle", "toggle"];
   const interaction = (event: Event) => {
+    if (event.type === "scroll") {
+      // Reposition only these few foreground frames synchronously; no full
+      // gallery measurement is needed to keep native scrolling on its border.
+      for (const [element, record] of records) if (record.foreground?.isConnected && record.foreground.style.display !== "none") positionForeground(element, record.foreground);
+    }
     for (let element = event.target instanceof view.Element ? event.target : null; element; element = element.parentElement) { const record = records.get(element as HTMLElement); if (record) record.transitionDirty = true; }
     schedule();
   };

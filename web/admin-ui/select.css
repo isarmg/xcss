@@ -8,7 +8,8 @@
 }
 .xcss-select-trigger:disabled { opacity: .6; cursor: not-allowed; }
 .xcss-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.xcss-select-arrow { flex: none; }
+.xcss-select-trigger .xcss-select-arrow { display: block; flex: none; width: 16px; height: 16px; fill: none; transform-origin: center; }
+.xcss-select-trigger[aria-expanded=true] .xcss-select-arrow { transform: rotate(90deg); }
 .xcss-select-panel {
   position: fixed; inset: auto; margin: 0; padding: 0; box-sizing: border-box;
   min-width: 0; max-width: calc(100vw - 16px); overflow: auto; overscroll-behavior: contain;
@@ -16,7 +17,11 @@
   border: 1px solid var(--xcss-block-border, currentColor); font: inherit;
   --xcss-server-corner-extent: var(--xcss-server-corner-panel, 42px);
   --xcss-server-corner-mode: clip;
+  --xcss-server-corner-foreground: 1;
 }
+/* Hidden popovers cannot be measured. Reveal a newly opened panel only once
+ * its shared contour and shadow are painted, including the first frame. */
+.xcss-select-panel:popover-open:not([data-xcss-server-corner-state=clip]):not([data-xcss-server-corner-reason=forced-colors]) { visibility: hidden; }
 .xcss-select-option {
   display: flex; align-items: center; justify-content: space-between; gap: .75rem;
   min-height: 44px; padding: .5rem max(1rem, var(--xcss-server-corner-text-inset, 26px));

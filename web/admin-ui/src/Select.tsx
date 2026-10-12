@@ -202,7 +202,8 @@ function PopupSelect({ className, style, id, autoFocus, tabIndex, onChange, onIn
       disabled={snapshot.disabled} autoFocus={autoFocus} tabIndex={tabIndex} title={props.title} style={style}
       className={`xcss-input xcss-select-trigger${className ? ` ${className}` : ""}`}
       onClick={event => { event.preventDefault(); if (open) close(); else show(); }} onKeyDown={keyDown}>
-      <span className="xcss-select-value">{snapshot.label || "\u00a0"}</span><span className="xcss-select-arrow" aria-hidden="true">⌄</span>
+      <span className="xcss-select-value">{snapshot.label || "\u00a0"}</span>
+      <svg className="xcss-select-arrow" aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="m9 6 6 6-6 6" /></svg>
     </button>
     <select {...props} ref={native} id={`${generated}-native`} className="xcss-select-native" aria-hidden="true" tabIndex={-1}
       onChange={event => { invalid.current = null; event.currentTarget.setCustomValidity(""); setMessage(""); onChange?.(event); synchronize(); }}

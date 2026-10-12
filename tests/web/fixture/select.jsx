@@ -1,6 +1,6 @@
 import React, { StrictMode, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { Button, Dialog, FormField, Select } from "../../../dist/admin-ui/index.js";
+import { Button, Dialog, FormField, Select, TextField } from "../../../dist/admin-ui/index.js";
 import { startServerCorners } from "../../../dist/admin-ui/server-corners.js";
 import "../../../web/design-tokens/tokens.css";
 import "../../../web/design-tokens/tokens.dark.css";
@@ -31,6 +31,7 @@ function Fixture() {
     <Button onClick={() => setLabel("Renamed controlled")}>Rename label</Button>
     <FormField label="Dynamic"><Select defaultValue="g" name="dynamic"><option value="a">Alpha</option>{!dynamic && <option value="g">Gamma</option>}</Select></FormField>
     <Button onClick={() => setDynamic(value => !value)}>Remove option</Button>
+    <FormField label="Text input"><TextField defaultValue="Value" /></FormField>
     <FormField label="Multiple"><Select name="many" aria-label="Multiple" multiple size={3} defaultValue={["a"]} onChange={event => { window.multipleValues = Array.from(event.target.selectedOptions, option => option.value); }}>{options}</Select></FormField>
     <Button onClick={() => setDialog(true)}>Open select dialog</Button>
     {dialog && <Dialog title="Select dialog" onClose={() => setDialog(false)}><div style={{ height: 90, overflow: "hidden" }}><FormField label="Dialog choice"><Select defaultValue="a">{options}</Select></FormField></div><Button>Dialog next</Button></Dialog>}

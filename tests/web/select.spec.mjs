@@ -109,3 +109,94 @@ test("popup inside modal escapes its clipped ancestor; Escape closes only the pi
   await expect(page.locator(".xcss-select-panel:popover-open")).toHaveCount(0);
   await control.press("Enter"); await control.press("Tab"); await expect(dialog.getByRole("button", { name: "Dialog next", exact: true })).toBeFocused();
 });
+
+test("input click removes the outline without changing any existing border or adding a replacement ring", async ({ page }) => {
+  await ready(page);
+  const field = page.getByRole("textbox", { name: "Text input", exact: true });
+  const paint = () => field.evaluate(input => {
+    const css = getComputedStyle(input);
+    return { borders: ["Top", "Right", "Bottom", "Left"].map(side => [css[`border${side}Width`], css[`border${side}Color`], css[`border${side}Style`]]),
+      shadow: css.boxShadow, image: css.borderImageSource, outline: css.outlineWidth };
+  });
+  await expect(field).toHaveAttribute("data-xcss-server-corner-state", "clip");
+  const before = await paint(); await field.click(); await expect(field).toBeFocused();
+  const after = await paint();
+  expect(after.outline).toBe("0px"); expect(after.borders).toEqual(before.borders);
+  expect(after.shadow).toBe(before.shadow); expect(after.image).toBe(before.image);
+});
+
+test("the centred right SVG arrow rotates down without moving on open", async ({ page }) => {
+  await ready(page);
+  const control = page.getByRole("combobox", { name: "Painted", exact: true });
+  const arrow = control.locator("svg.xcss-select-arrow");
+  await control.evaluate(trigger => trigger.parentElement.classList.add("searchbar"));
+  await page.addStyleTag({ content: ".searchbar svg { fill: currentColor; width: 1.5rem; height: 1.5rem; }" });
+  await expect(arrow.locator("path")).toHaveAttribute("d", "m9 6 6 6-6 6");
+  const geometry = () => arrow.evaluate(svg => {
+    const box = svg.getBoundingClientRect(), host = svg.parentElement.getBoundingClientRect(), path = svg.querySelector("path").getBBox();
+    return { width: box.width, height: box.height, relativeX: box.x - host.x, relativeY: box.y - host.y,
+      verticalCentreError: box.y + box.height / 2 - host.y - host.height / 2,
+      internalCentre: [path.x + path.width / 2, path.y + path.height / 2],
+      origin: getComputedStyle(svg).transformOrigin, transform: getComputedStyle(svg).transform };
+  });
+  const closed = await geometry(); expect(closed.internalCentre).toEqual([12,12]);
+  await expect(arrow).toHaveCSS("fill", "none");
+  expect(closed.width).toBe(16); expect(closed.height).toBe(16);
+  expect(Math.abs(closed.verticalCentreError)).toBeLessThan(.5); expect(closed.transform).toBe("none");
+  await control.click(); const opened = await geometry();
+  expect(opened.transform).toBe("matrix(0, 1, -1, 0, 0, 0)");
+  expect(opened.origin).toBe("8px 8px");
+  for (const name of ["width", "height", "relativeX", "relativeY"]) expect(opened[name]).toBeCloseTo(closed[name], 4);
+  expect(Math.abs(opened.verticalCentreError)).toBeLessThan(.5);
+  await control.press("Escape"); await expect(arrow).toHaveCSS("transform", "none");
+});
+
+test("the first visible popup frame already has all four masked corners and the painted shadow", async ({ page }, info) => {
+  await ready(page);
+  const first = await page.evaluate(() => new Promise((resolve, reject) => {
+    const control = document.getElementById("painted");
+    const panel = document.getElementById(control.getAttribute("aria-controls"));
+    panel.style.boxShadow = "0 6px 12px 0 rgb(0 0 0 / .4)";
+    const samples = [];
+    let completed = false, frames = 0;
+    const sample = phase => {
+      if (!panel.matches(":popover-open")) return;
+      const css = getComputedStyle(panel), rect = panel.getBoundingClientRect();
+      const visible = css.visibility === "visible" && css.display !== "none" && rect.width > 0 && rect.height > 0;
+      const value = { phase, visible, state: panel.dataset.xcssServerCornerState, reason: panel.dataset.xcssServerCornerReason,
+        mask: css.maskImage, shadowImage: css.borderImageSource, nativeShadow: css.boxShadow,
+        box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } };
+      samples.push(value);
+      if (visible && !completed) {
+        completed = true; observer.disconnect(); window.firstPopupFrames = samples;
+        resolve({ first: value, samples });
+      }
+    };
+    const observer = new MutationObserver(() => sample("mutation-before-paint"));
+    observer.observe(panel, { attributes: true });
+    const frame = () => {
+      sample(`raf-${++frames}`);
+      if (!completed && frames < 120) requestAnimationFrame(frame);
+      else if (!completed) { observer.disconnect(); reject(new Error("Popup never became visible")); }
+    };
+    requestAnimationFrame(frame);
+    control.click(); sample("synchronous-open");
+  }));
+  expect(first.samples.some(sample => !sample.visible)).toBe(true);
+  for (const sample of first.samples.filter(sample => sample.visible)) {
+    expect(sample.state).toBe("clip"); expect(sample.mask).not.toBe("none"); expect(sample.shadowImage).not.toBe("none");
+  }
+  expect(first.first.nativeShadow).toBe("none");
+  const box = first.first.box, margin = 12;
+  const pixels = await page.screenshot({ path: info.outputPath("first-visible-popup-shadow.png"),
+    clip: { x: box.x - margin, y: box.y - margin, width: box.width + margin * 2, height: box.height + margin * 2 } });
+  const w = Math.floor(box.width), h = Math.floor(box.height);
+  const corners = [[margin+1,margin+1],[margin+w-2,margin+1],[margin+1,margin+h-2],[margin+w-2,margin+h-2]];
+  for (const pixel of pngPixels(pixels, corners)) {
+    expect(pixel[0]).toBe(pixel[1]); expect(pixel[1]).toBe(pixel[2]);
+  }
+  expect(pngPixels(pixels, [[margin+Math.floor(w/2),margin+Math.floor(h/2)]])[0]).toEqual([0,0,255,255]);
+  const shadow = pngPixels(pixels, [[margin+Math.floor(w/2),margin+h+4]])[0];
+  expect(shadow[0]).toBeLessThan(250); expect(shadow[0]).toBe(shadow[1]); expect(shadow[1]).toBe(shadow[2]);
+  await info.attach("first-visible-frame-observations", { body: JSON.stringify(first, null, 2), contentType: "application/json" });
+});

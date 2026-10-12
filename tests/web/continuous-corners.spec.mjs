@@ -11,6 +11,188 @@ const ready = async page => {
 const state = (page, id) => page.locator(`#${id}`).getAttribute("data-xcss-server-corner-state");
 const frame = page => page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 
+const dropdownFrame = async page => {
+  await ready(page);
+  await page.evaluate(() => {
+    // Contrast integration needs a known white underlay, independent of the
+    // gallery cards that happen to sit underneath this fixed test popup.
+    const underlay = document.createElement("div");
+    underlay.style.cssText = "position:fixed;inset:0;background:white;z-index:999";
+    document.body.append(underlay);
+    const node = document.createElement("div"); node.id = "dropdown-frame";
+    node.style.cssText = "position:fixed;left:80px;top:80px;width:242px;height:134px;z-index:1000;box-sizing:border-box;overflow:auto;padding:0;border:1px solid rgb(100,100,100);background:white;--xcss-server-corner-extent:42px;--xcss-server-corner-mode:clip;--xcss-server-corner-foreground:1";
+    for (let index = 0; index < 3; index++) {
+      const row = document.createElement("div"); row.id = `dropdown-row-${index}`; row.setAttribute("role", "option");
+      row.style.cssText = "height:44px;background:white";
+      row.addEventListener("pointerenter", () => row.style.background = "red");
+      row.addEventListener("pointerleave", () => row.style.background = "white");
+      node.append(row);
+    }
+    document.body.append(node);
+  });
+  const panel = page.locator("#dropdown-frame");
+  await expect(panel).toHaveAttribute("data-xcss-server-corner-state", "clip");
+  await expect(panel.locator('svg[data-xcss-server-corner-decoration="foreground"]')).toHaveCount(1);
+  await frame(page);
+  return panel;
+};
+
+test("dropdown foreground keeps the whole grey border above first/last selected and hovered rows", async ({ browser }, info) => {
+  const context = await browser.newContext({ baseURL: "http://127.0.0.1:4189", deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  try {
+    const panel = await dropdownFrame(page), original = await panel.boundingBox();
+    const points = await panel.evaluate(node => {
+      const geometry = window.createServerCornerGeometry({ width: node.offsetWidth, height: node.offsetHeight, extent: 42, tolerance: .02 });
+      return geometry.corners.map(corner => {
+        const q = corner.points.reduce((best, q) => Math.abs(q.parameter - .5) < Math.abs(best.parameter - .5) ? q : best);
+        return [Math.floor((q.x - Math.sin(q.heading) * .55) * 2), Math.floor((q.y + Math.cos(q.heading) * .55) * 2)];
+      });
+    });
+    for (const state of ["idle", "first", "last", "selected"]) {
+      if (state === "first") await page.locator("#dropdown-row-0").hover();
+      if (state === "last") await page.locator("#dropdown-row-2").hover();
+      if (state === "selected") await panel.getByRole("option").evaluateAll(rows => rows.forEach(row => { row.setAttribute("aria-selected", "true"); row.style.background = "red"; }));
+      await frame(page);
+      const pixels = await panel.screenshot({ path: info.outputPath(`grey-border-${state}.png`) });
+      expect(pngPixels(pixels, points)).toEqual(Array(4).fill([100,100,100,255]));
+      expect(pngPixels(pixels, [[242,1], [483,134], [242,267], [1,134]])).toEqual(Array(4).fill([100,100,100,255]));
+    }
+    expect(await panel.boundingBox()).toEqual(original);
+    const foreground = panel.locator('svg[data-xcss-server-corner-decoration="foreground"]');
+    await expect(foreground).toHaveAttribute("aria-hidden", "true");
+    await expect(foreground).toHaveCSS("pointer-events", "none");
+    await expect(foreground).toHaveCSS("visibility", "visible");
+    expect(await panel.evaluate(node => { const box = node.getBoundingClientRect(); return document.elementFromPoint(box.x + box.width / 2, box.y + 22)?.getAttribute("role"); })).toBe("option");
+  } finally { await context.close(); }
+});
+
+test("fractional dropdown borders have equal measured width at DPR1 and DPR2", async ({ browser }, info) => {
+  for (const dpr of [1,2]) {
+    const context = await browser.newContext({ baseURL: "http://127.0.0.1:4189", deviceScaleFactor: dpr });
+    const page = await context.newPage();
+    try {
+      const panel = await dropdownFrame(page);
+      await panel.evaluate(node => {
+        node.style.left = "80.25px"; node.style.top = "80.5px"; node.style.width = "242.375px"; node.style.height = "134.625px";
+        for (const row of node.querySelectorAll('[role="option"]')) row.style.height = "calc(132.625px / 3)";
+      });
+      await frame(page);
+      const box = await panel.boundingBox(), clip = { x: 40, y: 40, width: 350, height: 230 };
+      const pixels = await page.screenshot({ path: info.outputPath(`fractional-border-dpr${dpr}.png`), clip });
+      const centerX = Math.floor((box.x + box.width / 2 - clip.x) * dpr), centerY = Math.floor((box.y + box.height / 2 - clip.y) * dpr);
+      const strips = [box.y, box.x + box.width, box.y + box.height, box.x].map((edge, index) => Array.from({ length: Math.ceil(8 * dpr) }, (_, n) => index % 2
+        ? [Math.floor((edge - clip.x - 4) * dpr) + n, centerY] : [centerX, Math.floor((edge - clip.y - 4) * dpr) + n]));
+      const widths = strips.map(points => pngPixels(pixels, points).reduce((total, color) => total + (255 - color[0]) / 155, 0) / dpr);
+      await info.attach(`measured-border-widths-dpr${dpr}`, { body: JSON.stringify({ dpr, box, widths }), contentType: "application/json" });
+      // Fractional raster coverage, especially a second SVG mask in Gecko,
+      // may lose part of one device pixel. Integrate colour instead of
+      // comparing the count of solid black pixels at differently aligned edges.
+      for (const width of widths) expect(Math.abs(width - 1)).toBeLessThan(.16);
+      expect(Math.max(...widths) - Math.min(...widths)).toBeLessThan(.16);
+    } finally { await context.close(); }
+  }
+});
+
+test("dropdown foreground stays on its viewport through native scroll, transforms, popovers and cleanup", async ({ page }, info) => {
+  const panel = await dropdownFrame(page);
+  await page.evaluate(() => {
+    window.serverCorners.stop();
+    window.cornerURLs = {created: [], revoked: []};
+    const create = URL.createObjectURL.bind(URL), revoke = URL.revokeObjectURL.bind(URL);
+    URL.createObjectURL = blob => { const url = create(blob); window.cornerURLs.created.push(url); return url; };
+    URL.revokeObjectURL = url => { window.cornerURLs.revoked.push(url); revoke(url); };
+    window.serverCorners = window.startServerCorners(document);
+  });
+  await frame(page);
+  await panel.evaluate(node => {
+    const wrapper = document.createElement("div");
+    wrapper.style.cssText = "position:fixed;left:100px;top:80px;width:360px;height:280px;z-index:1000;transform:rotate(7deg) scale(1.125);transform-origin:0 0";
+    node.before(wrapper); wrapper.append(node); node.style.position = "relative"; node.style.left = "20px"; node.style.top = "20px";
+    for (let index = 3; index < 30; index++) { const row = document.createElement("div"); row.setAttribute("role", "option"); row.style.cssText = "height:44px;background:red"; node.append(row); }
+  });
+  await frame(page);
+  const foreground = panel.locator('svg[data-xcss-server-corner-decoration="foreground"]');
+  const alignment = () => panel.evaluate(node => {
+    const svg = node.querySelector('svg[data-xcss-server-corner-decoration="foreground"]');
+    const host = node.getBoundingClientRect(), border = svg.getBoundingClientRect();
+    return [Math.abs(host.x - border.x), Math.abs(host.y - border.y), Math.abs(host.width - border.width), Math.abs(host.height - border.height)];
+  });
+  for (const error of await alignment()) expect(error).toBeLessThan(.03);
+  const size = await panel.evaluate(node => [node.clientWidth, node.clientHeight, node.scrollWidth, node.scrollHeight]);
+  await panel.hover(); await page.mouse.wheel(0, 220);
+  await expect.poll(() => panel.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+  await frame(page);
+  for (const error of await alignment()) expect(error).toBeLessThan(.03);
+  expect(await panel.evaluate(node => [node.clientWidth, node.clientHeight, node.scrollWidth, node.scrollHeight])).toEqual(size);
+  await page.screenshot({ path: info.outputPath("fixed-grey-border-native-scroll-transform.png") });
+  // A transformed scrolling host is its own fixed containing block. The
+  // synchronous scroll handler must also preserve this less usual case.
+  await panel.evaluate(node => { node.style.transform = "scale(.9)"; node.style.transformOrigin = "0 0"; });
+  await frame(page); await panel.hover(); await page.mouse.wheel(0, 120); await frame(page);
+  for (const error of await alignment()) expect(error).toBeLessThan(.03);
+  await panel.evaluate(node => { node.style.transform = "none"; node.setAttribute("popover", "manual"); node.style.position = "fixed"; node.style.left = "80px"; node.style.top = "80px"; node.showPopover(); });
+  await frame(page);
+  for (const error of await alignment()) expect(error).toBeLessThan(.03);
+  await expect(foreground).toBeVisible();
+  await panel.evaluate(node => node.hidePopover()); await frame(page);
+  await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", "not-visible");
+  await expect(foreground).toHaveCSS("display", "none");
+  await panel.evaluate(node => node.showPopover()); await frame(page);
+  await expect(foreground).toBeVisible();
+  await page.emulateMedia({ forcedColors: "active" });
+  await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", "forced-colors");
+  await expect(foreground).toHaveCSS("display", "none");
+  await page.emulateMedia({ forcedColors: "none" }); await frame(page);
+  await expect(foreground).toBeVisible();
+  await panel.evaluate(node => { node.style.visibility = "hidden"; }); await frame(page);
+  await expect(foreground).toHaveCSS("visibility", "hidden");
+  await panel.evaluate(node => { node.style.visibility = "visible"; }); await frame(page);
+  await panel.evaluate(node => { window.removedDropdownFrame = node; node.remove(); }); await frame(page);
+  expect(await page.evaluate(() => window.removedDropdownFrame.querySelector('[data-xcss-server-corner-decoration="foreground"]'))).toBeNull();
+  await page.evaluate(() => window.serverCorners.stop());
+  expect(await page.locator('[data-xcss-server-corner-decoration="foreground"]').count()).toBe(0);
+  expect(await page.evaluate(() => {
+    const {created, revoked} = window.cornerURLs;
+    return created.length > 0 && created.every(url => revoked.includes(url));
+  })).toBe(true);
+});
+
+test("dropdown foreground positions after backdrop fixed containing block is removed", async ({ page }) => {
+  const panel = await dropdownFrame(page);
+  await panel.evaluate(node => { node.style.backdropFilter = "blur(3px)"; node.style.background = "rgba(255,255,255,.9)"; });
+  await expect(panel).toHaveCSS("backdrop-filter", "none"); await frame(page);
+  await expect(panel.locator('div[data-xcss-server-corner-decoration]')).toHaveCSS("backdrop-filter", "blur(3px)");
+  const error = await panel.evaluate(node => {
+    const host = node.getBoundingClientRect(), border = node.querySelector('svg[data-xcss-server-corner-decoration="foreground"]').getBoundingClientRect();
+    return [Math.abs(host.x - border.x), Math.abs(host.y - border.y), Math.abs(host.width - border.width), Math.abs(host.height - border.height)];
+  });
+  for (const value of error) expect(value).toBeLessThan(.03);
+});
+
+test("native definite-size popover toggles restore dropdown readiness without refresh or resize delivery", async ({ page }) => {
+  // Delay the real ResizeObserver notifications so this test exercises the
+  // native toggle event path itself, rather than an incidental size callback.
+  await page.addInitScript(() => {
+    const Original = window.ResizeObserver;
+    window.ResizeObserver = class extends Original {
+      constructor(callback) { super((entries, observer) => { if (!window.delayCornerResize) callback(entries, observer); }); }
+    };
+  });
+  const panel = await dropdownFrame(page);
+  await panel.evaluate(node => node.setAttribute("popover", "manual"));
+  await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", "not-visible");
+  await page.evaluate(async () => { await document.fonts.ready; window.delayCornerResize = true; });
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await panel.evaluate(node => node.showPopover());
+    await expect(panel).toHaveAttribute("data-xcss-server-corner-state", "clip");
+    await expect(panel.locator('svg[data-xcss-server-corner-decoration="foreground"]')).toBeVisible();
+    await panel.evaluate(node => node.hidePopover());
+    await expect(panel).toHaveAttribute("data-xcss-server-corner-reason", "not-visible");
+    await expect(panel.locator('svg[data-xcss-server-corner-decoration="foreground"]')).toHaveCSS("display", "none");
+  }
+});
+
 test("Mac mini surfaces preserve layout, zero regions, circles, pills and grid rows", async ({ page }) => {
   await ready(page);
   for (const id of ["panel", "notification", "control", "textarea", "grid-row", "auth"]) await expect(page.locator(`#${id}`)).toHaveAttribute("data-xcss-server-corner-state", "paint");

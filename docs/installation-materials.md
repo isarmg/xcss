@@ -8,6 +8,8 @@
 
 配置数据类型通过 `configuration_contract::generate<T>()` 导出 Schema 和默认值。产品定义当前语义规则数组，运行时调用 `configuration_contract::validate_rules(rules, value, root, source)`；构建脚本原样导出规则与产品验证向量。规则使用 JSON Pointer 选择字段，未知规则、参数、缺失字段和错误类型直接拒绝，诊断不包含候选配置值。
 
+`integer-order` 的 `relation` 接受 `less-or-equal` 或 `less-than`；`left_scale`、`right_scale` 是正整数，省略时为 1。先使用检查乘法换算两侧单位再比较，溢出拒绝，不截断或绕回。
+
 当前规则包括整数范围和顺序、枚举、SocketAddr、独立监听地址、路径、根命名空间保护、路径关系、URL 和开发 Web 覆盖。根路径定义使用 `base/value/fallback/suffix/encoding`，最多 16 层 fallback；`server_layout::ROOT_RESERVED_DIRECTORIES` 是保护名称的公共来源。外置业务路径可使用绝对地址。`root-state-paths` 保护根命名空间，`path-relation` 明确决定是否允许业务数据位于私有目录下，并保护产品声明的私有文件前缀。真实权限、链接、文件身份及开发资源目录检查仍由使用方执行。
 
 当前会话完整检查预算为 `MAXIMUM_SESSION_CHECK_ROWS`，包括已撤销的保留行；活动会话容量仍由认证策略单独定义。超出完整检查预算必须拒绝相关操作，不能跳过余下行。

@@ -150,17 +150,29 @@ fn apply(rule: &Rule, value: &Value, root: &Path) -> Result<()> {
         }
         "integer-order" => {
             fields(rule, 2)?;
-            keys(args, &["relation"])?;
-            if text(args, "relation")? != "less-or-equal" {
+            keys(args, &["relation", "left_scale", "right_scale"])?;
+            let relation = text(args, "relation")?;
+            if !matches!(relation, "less-or-equal" | "less-than") {
                 return mapping();
             }
+            let scale = |name| match args.get(name) {
+                None => Ok(1),
+                Some(value) => value
+                    .as_u64()
+                    .filter(|n| *n != 0)
+                    .ok_or(Reason::InvalidMapping),
+            };
             let lhs = candidate(value, &rule.fields[0])?
                 .as_u64()
-                .ok_or(Reason::TypeMismatch)?;
+                .ok_or(Reason::TypeMismatch)?
+                .checked_mul(scale("left_scale")?)
+                .ok_or(Reason::InvalidValue)?;
             let rhs = candidate(value, &rule.fields[1])?
                 .as_u64()
-                .ok_or(Reason::TypeMismatch)?;
-            if lhs > rhs {
+                .ok_or(Reason::TypeMismatch)?
+                .checked_mul(scale("right_scale")?)
+                .ok_or(Reason::InvalidValue)?;
+            if lhs > rhs || (relation == "less-than" && lhs == rhs) {
                 return Err(Reason::InvalidValue);
             }
         }

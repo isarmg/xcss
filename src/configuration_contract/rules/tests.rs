@@ -180,3 +180,42 @@ fn declared_path_relationship_preserves_allowed_subtrees_and_protects_private_en
         }
     }
 }
+
+#[test]
+fn integer_order_supports_strict_unit_conversion_and_rejects_overflow_or_unknown_arguments() {
+    let rule = |arguments| json!([{"kind":"integer-order","fields":["/left","/right"],"arguments":arguments}]);
+    let strict = rule(json!({"relation":"less-than","right_scale":1000}));
+    validate(strict.clone(), json!({"left":999,"right":1})).unwrap();
+    for left in [1000, 1001, u64::MAX] {
+        assert!(validate(strict.clone(), json!({"left":left,"right":1})).is_err());
+    }
+    assert!(validate(strict, json!({"left":1,"right":u64::MAX})).is_err());
+    let inclusive = rule(json!({"relation":"less-or-equal","left_scale":1000}));
+    validate(inclusive.clone(), json!({"left":1,"right":1000})).unwrap();
+    assert!(validate(inclusive, json!({"left":1,"right":999})).is_err());
+    validate(
+        rule(json!({"relation":"less-or-equal"})),
+        json!({"left":1,"right":1}),
+    )
+    .unwrap();
+    assert!(
+        validate(
+            rule(json!({"relation":"less-than"})),
+            json!({"left":1,"right":1})
+        )
+        .is_err()
+    );
+    for args in [
+        json!({"relation":"less-than","left_scale":0}),
+        json!({"relation":"less-than","right_scale":-1}),
+        json!({"relation":"less-than","left_scale":true}),
+        json!({"relation":"less-than","unrecognized":1}),
+    ] {
+        assert_eq!(
+            validate(rule(args), json!({"left":1,"right":2}))
+                .unwrap_err()
+                .reason,
+            Reason::InvalidMapping
+        );
+    }
+}

@@ -17,6 +17,6 @@ xcss 为服务端和管理 Web 提供公共 Rust crate 与 npm 包。产品在�
 - [发行工具操作](operations.md)
 - [功能索引](feature-inventory-and-tradeoffs.md)与[专题参考](reference/README.md)
 - [开发者导读](beginner-guide/README.md)
-- [架构决策](architecture/README.md)与 [1.0.14 发布说明](releases/1.0.14.md)、[历史 1.0.12 发布说明](releases/1.0.12.md)、[历史 1.0.11 发布说明](releases/1.0.11.md)、[1.0.10 标签说明](releases/1.0.10.md)、[历史 1.0.9 发布说明](releases/1.0.9.md)、[历史 1.0.8 发布说明](releases/1.0.8.md)、[历史 1.0.7 发布说明](releases/1.0.7.md)、[历史 1.0.6 发布说明](releases/1.0.6.md)、[历史 1.0.5 发布说明](releases/1.0.5.md)、[历史 1.0.4 发布说明](releases/1.0.4.md)、[历史 1.0.3 发布说明](releases/1.0.3.md)、[历史 1.0.2 发布说明](releases/1.0.2.md)、[历史 1.0.1 发布说明](releases/1.0.1.md)及[历史 1.0.0 发布说明](releases/1.0.0.md)
+- [架构决策](architecture/README.md)与 [1.0.15 发布说明](releases/1.0.15.md)、[历史 1.0.12 发布说明](releases/1.0.12.md)、[历史 1.0.11 发布说明](releases/1.0.11.md)、[1.0.10 标签说明](releases/1.0.10.md)、[历史 1.0.9 发布说明](releases/1.0.9.md)、[历史 1.0.8 发布说明](releases/1.0.8.md)、[历史 1.0.7 发布说明](releases/1.0.7.md)、[历史 1.0.6 发布说明](releases/1.0.6.md)、[历史 1.0.5 发布说明](releases/1.0.5.md)、[历史 1.0.4 发布说明](releases/1.0.4.md)、[历史 1.0.3 发布说明](releases/1.0.3.md)、[历史 1.0.2 发布说明](releases/1.0.2.md)、[历史 1.0.1 发布说明](releases/1.0.1.md)及[历史 1.0.0 发布说明](releases/1.0.0.md)
 
 Rust 与 Web 构建目标为 Linux x86_64 GNU；部署后的浏览器页面可跨平台访问。代码采用 [Apache License 2.0](../LICENSE)。

@@ -25,6 +25,8 @@ pub fn installation_contract() -> Result<serde_json::Value, admin_auth::Error> {
             "argon2_acquire_timeout_micros": admin_core::ARGON2_ACQUIRE_TIMEOUT_MICROS,
             "login_attempts": {
                 "scope": "main-database-device-and-inode-per-process",
+                "scope_identity_lifetime": "verified-read-only-main-file-descriptor-pinned-until-registry-entry-retires",
+                "scope_identity_pins_max": admin_core::LOGIN_ATTEMPTS_SCOPES_MAX,
                 "counted": "all-admitted-login-attempts-before-credential-lookup",
                 "max": admin_core::LOGIN_ATTEMPTS_MAX,
                 "window_seconds": admin_core::LOGIN_ATTEMPTS_WINDOW.as_secs(),

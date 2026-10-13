@@ -4,7 +4,8 @@ use crate::admin_core::{AuthenticationState, AuthenticationStateError, LOGIN_ATT
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::{
     collections::HashMap,
-    os::unix::fs::MetadataExt,
+    fs::{File, OpenOptions},
+    os::unix::fs::{MetadataExt, OpenOptionsExt},
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
@@ -17,7 +18,13 @@ enum Scope {
 #[derive(Debug)]
 struct Entry {
     state: Arc<AuthenticationState>,
+    // Pin memory-scope pointer identity too: an allocator cannot reuse the
+    // options address while its unexpired registry entry still exists.
     owner: Weak<SqliteConnectOptions>,
+    _memory_identity_pin: Option<Arc<SqliteConnectOptions>>,
+    // Keeping the verified main file open prevents an unlinked database's
+    // device/inode from being recycled into a different installation scope.
+    _database_identity_pin: Option<File>,
 }
 
 #[derive(Debug, Default)]
@@ -30,6 +37,7 @@ impl Registry {
         &mut self,
         scope: Scope,
         owner: &Arc<SqliteConnectOptions>,
+        database_identity_pin: Option<File>,
     ) -> Result<Arc<AuthenticationState>, AuthenticationStateError> {
         if let Some(entry) = self.entries.get_mut(&scope) {
             entry.owner = Arc::downgrade(owner);
@@ -38,7 +46,7 @@ impl Registry {
         // Never evict a live counter or an unexpired window: recreating a
         // service/pool must not reset the installation's admitted attempts.
         self.entries.retain(|_, entry| {
-            entry.owner.strong_count() != 0
+            entry.owner.strong_count() > usize::from(entry._memory_identity_pin.is_some())
                 || Arc::strong_count(&entry.state) != 1
                 || !entry.state.can_retire()
         });
@@ -51,6 +59,8 @@ impl Registry {
             Entry {
                 state: state.clone(),
                 owner: Arc::downgrade(owner),
+                _memory_identity_pin: matches!(scope, Scope::Memory(_)).then(|| owner.clone()),
+                _database_identity_pin: database_identity_pin,
             },
         );
         Ok(state)
@@ -66,25 +76,41 @@ pub(super) async fn state_for_pool(
             .await
             .map_err(|_| AuthenticationStateError::Unavailable)?;
     let owner = pool.connect_options();
-    let scope = if filename.is_empty() {
-        Scope::Memory(Arc::as_ptr(&owner) as usize)
+    let (scope, database_identity_pin) = if filename.is_empty() {
+        (Scope::Memory(Arc::as_ptr(&owner) as usize), None)
     } else {
-        let metadata =
-            std::fs::metadata(filename).map_err(|_| AuthenticationStateError::Unavailable)?;
-        if !metadata.is_file() {
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(
+                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
+            )
+            .open(&filename)
+            .map_err(|_| AuthenticationStateError::Unavailable)?;
+        let metadata = file
+            .metadata()
+            .map_err(|_| AuthenticationStateError::Unavailable)?;
+        let named = std::fs::symlink_metadata(&filename)
+            .map_err(|_| AuthenticationStateError::Unavailable)?;
+        if !metadata.is_file()
+            || !named.is_file()
+            || (metadata.dev(), metadata.ino()) != (named.dev(), named.ino())
+        {
             return Err(AuthenticationStateError::Unavailable);
         }
-        Scope::File {
-            device: metadata.dev(),
-            inode: metadata.ino(),
-        }
+        (
+            Scope::File {
+                device: metadata.dev(),
+                inode: metadata.ino(),
+            },
+            Some(file),
+        )
     };
     static REGISTRY: OnceLock<Mutex<Registry>> = OnceLock::new();
     REGISTRY
         .get_or_init(|| Mutex::new(Registry::default()))
         .lock()
         .map_err(|_| AuthenticationStateError::Unavailable)?
-        .acquire(scope, &owner)
+        .acquire(scope, &owner, database_identity_pin)
 }
 
 #[cfg(test)]
@@ -103,6 +129,7 @@ mod tests {
                     inode: 1,
                 },
                 &owner,
+                None,
             )
             .unwrap();
         for _ in 0..LOGIN_ATTEMPTS_MAX {
@@ -113,7 +140,7 @@ mod tests {
         let owner = Arc::new(SqliteConnectOptions::new());
         for inode in 2..=LOGIN_ATTEMPTS_SCOPES_MAX as u64 {
             registry
-                .acquire(Scope::File { device: 1, inode }, &owner)
+                .acquire(Scope::File { device: 1, inode }, &owner, None)
                 .unwrap();
         }
         assert!(matches!(
@@ -122,7 +149,8 @@ mod tests {
                     device: 1,
                     inode: 999
                 },
-                &owner
+                &owner,
+                None
             ),
             Err(AuthenticationStateError::Unavailable)
         ));
@@ -133,6 +161,7 @@ mod tests {
                     inode: 1,
                 },
                 &owner,
+                None,
             )
             .unwrap();
         assert!(matches!(
@@ -150,7 +179,8 @@ mod tests {
                         device: 1,
                         inode: 999
                     },
-                    &owner
+                    &owner,
+                    None
                 )
                 .is_ok()
         );
@@ -199,5 +229,117 @@ mod tests {
         ));
         recreated.close().await;
         Ok(())
+    }
+
+    #[tokio::test]
+    async fn unlinked_database_scope_stays_pinned_and_new_database_is_independent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::admin_core::AdministratorStore;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("administrator.sqlite3");
+        let options = || {
+            SqliteConnectOptions::new()
+                .filename(&path)
+                .create_if_missing(true)
+        };
+        let first = SqlitePool::connect_with(options()).await?;
+        sqlx::raw_sql(crate::admin_sqlite::ADMIN_PERSISTENT_DDL)
+            .execute(&first)
+            .await?;
+        crate::testkit::initialize_administrator_fixture(
+            &first,
+            "admin",
+            "correct horse battery",
+            1,
+        )
+        .await;
+        let old = super::super::SqliteAdministratorStore::new(first.clone())
+            .authentication_state()
+            .await?;
+        let before = std::fs::metadata(&path)?;
+        for _ in 0..LOGIN_ATTEMPTS_MAX {
+            old.admit_login_attempt()?;
+        }
+        first.close().await;
+        drop(first);
+        std::fs::remove_file(&path)?;
+        let second = SqlitePool::connect_with(options()).await?;
+        sqlx::raw_sql(crate::admin_sqlite::ADMIN_PERSISTENT_DDL)
+            .execute(&second)
+            .await?;
+        // Intentionally retain the same fixed administrator identity/time:
+        // scope isolation comes from the pinned physical file, not account data.
+        crate::testkit::initialize_administrator_fixture(
+            &second,
+            "admin",
+            "correct horse battery",
+            1,
+        )
+        .await;
+        let after = std::fs::metadata(&path)?;
+        assert_ne!((before.dev(), before.ino()), (after.dev(), after.ino()));
+        let new = super::super::SqliteAdministratorStore::new(second.clone())
+            .authentication_state()
+            .await?;
+        assert!(!Arc::ptr_eq(&old, &new));
+        new.admit_login_attempt()?;
+        assert!(matches!(
+            old.admit_login_attempt(),
+            Err(AuthenticationStateError::LoginAttemptsExceeded { .. })
+        ));
+        second.close().await;
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn expired_unowned_registry_entry_releases_file_and_memory_identity_pins() {
+        use std::os::fd::AsRawFd;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("scope");
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        let metadata = file.metadata().unwrap();
+        let descriptor_path = format!("/proc/self/fd/{}", file.as_raw_fd());
+        let scope = Scope::File {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+        };
+        let owner = Arc::new(SqliteConnectOptions::new());
+        let mut registry = Registry::default();
+        let state = registry.acquire(scope, &owner, Some(file)).unwrap();
+        state.admit_login_attempt().unwrap();
+        assert!(registry.entries[&scope]._database_identity_pin.is_some());
+        let memory_owner = Arc::new(SqliteConnectOptions::new());
+        let weak = Arc::downgrade(&memory_owner);
+        let memory_scope = Scope::Memory(Arc::as_ptr(&memory_owner) as usize);
+        let memory_state = registry.acquire(memory_scope, &memory_owner, None).unwrap();
+        memory_state.admit_login_attempt().unwrap();
+        drop(memory_owner);
+        drop(memory_state);
+        drop(owner);
+        drop(state);
+        assert!(weak.upgrade().is_some());
+        assert_eq!(registry.entries.len(), 2);
+        tokio::time::advance(std::time::Duration::from_secs(60)).await;
+        let next_owner = Arc::new(SqliteConnectOptions::new());
+        let next_scope = Scope::Memory(Arc::as_ptr(&next_owner) as usize);
+        registry.acquire(next_scope, &next_owner, None).unwrap();
+        assert!(!registry.entries.contains_key(&scope));
+        assert!(!registry.entries.contains_key(&memory_scope));
+        assert!(weak.upgrade().is_none());
+        assert_eq!(registry.entries.len(), 1);
+        // Another parallel test may already reuse the descriptor number, but
+        // it must no longer identify this entry's original database inode.
+        match std::fs::metadata(&descriptor_path) {
+            Ok(current) => assert_ne!(
+                (current.dev(), current.ino()),
+                (metadata.dev(), metadata.ino())
+            ),
+            Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::NotFound),
+        }
     }
 }

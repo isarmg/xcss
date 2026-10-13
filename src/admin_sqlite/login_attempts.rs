@@ -4,8 +4,8 @@ use crate::admin_core::{AuthenticationState, AuthenticationStateError, LOGIN_ATT
 use sqlx::{SqlitePool, sqlite::SqliteConnectOptions};
 use std::{
     collections::HashMap,
-    fs::{File, OpenOptions},
-    os::unix::fs::{MetadataExt, OpenOptionsExt},
+    fs::File,
+    os::unix::fs::MetadataExt,
     sync::{Arc, Mutex, OnceLock, Weak},
 };
 
@@ -24,6 +24,8 @@ struct Entry {
     _memory_identity_pin: Option<Arc<SqliteConnectOptions>>,
     // Keeping the verified main file open prevents an unlinked database's
     // device/inode from being recycled into a different installation scope.
+    // O_PATH is essential: closing an ordinary descriptor for the same inode
+    // would release this process's SQLite POSIX byte-range locks.
     _database_identity_pin: Option<File>,
 }
 
@@ -79,13 +81,13 @@ pub(super) async fn state_for_pool(
     let (scope, database_identity_pin) = if filename.is_empty() {
         (Scope::Memory(Arc::as_ptr(&owner) as usize), None)
     } else {
-        let file = OpenOptions::new()
-            .read(true)
-            .custom_flags(
-                (rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::NONBLOCK).bits() as i32,
-            )
-            .open(&filename)
-            .map_err(|_| AuthenticationStateError::Unavailable)?;
+        let file = rustix::fs::open(
+            &filename,
+            rustix::fs::OFlags::PATH | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map(File::from)
+        .map_err(|_| AuthenticationStateError::Unavailable)?;
         let metadata = file
             .metadata()
             .map_err(|_| AuthenticationStateError::Unavailable)?;
@@ -117,6 +119,7 @@ pub(super) async fn state_for_pool(
 mod tests {
     use super::*;
     use crate::admin_core::LOGIN_ATTEMPTS_MAX;
+    use std::fs::OpenOptions;
 
     #[tokio::test(start_paused = true)]
     async fn registry_is_bounded_and_preserves_dropped_unexpired_scopes() {
@@ -341,5 +344,113 @@ mod tests {
             ),
             Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::NotFound),
         }
+    }
+
+    #[test]
+    #[ignore = "isolated child process used by the real writer-lock regression"]
+    fn sqlite_writer_probe_child() -> Result<(), Box<dyn std::error::Error>> {
+        use sqlx::Connection as _;
+        let path = std::env::var("XCSS_TEST_WRITER_DATABASE")?;
+        let expected_busy = std::env::var("XCSS_TEST_WRITER_BUSY")? == "true";
+        crate::sqlite::block_on_sqlite_connection(async {
+            let mut connection = sqlx::SqliteConnection::connect_with(
+                &SqliteConnectOptions::new()
+                    .filename(path)
+                    .create_if_missing(false)
+                    .busy_timeout(std::time::Duration::from_millis(20)),
+            )
+            .await?;
+            let result = sqlx::query("BEGIN IMMEDIATE")
+                .execute(&mut connection)
+                .await;
+            match result {
+                Ok(_) => {
+                    sqlx::query("ROLLBACK").execute(&mut connection).await?;
+                    assert!(
+                        !expected_busy,
+                        "another process acquired the SQLite writer lock while its owner still held a transaction"
+                    );
+                }
+                Err(error) => {
+                    assert!(expected_busy, "writer lock remained after commit: {error}");
+                    assert!(
+                        matches!(error, sqlx::Error::Database(ref error)
+                        if error.code().as_deref() == Some("5")),
+                        "unexpected writer probe error: {error}"
+                    );
+                }
+            }
+            connection.close().await?;
+            Ok::<_, Box<dyn std::error::Error>>(())
+        })
+    }
+
+    fn assert_child_writer(path: &std::path::Path, blocked: bool) {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .env_clear()
+            .env("XCSS_TEST_WRITER_DATABASE", path)
+            .env("XCSS_TEST_WRITER_BUSY", blocked.to_string())
+            .args([
+                "--exact",
+                "admin_sqlite::login_attempts::tests::sqlite_writer_probe_child",
+                "--ignored",
+                "--nocapture",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated SQLite writer probe failed: {} {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
+    }
+
+    #[tokio::test]
+    async fn repeated_scope_lookup_preserves_live_sqlite_writer_lock()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::admin_core::AdministratorStore;
+        let directory = tempfile::tempdir()?;
+        let path = directory.path().join("writer.sqlite3");
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .min_connections(2)
+            .max_connections(2)
+            .connect_with(
+                SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true)
+                    .journal_mode(sqlx::sqlite::SqliteJournalMode::Delete),
+            )
+            .await?;
+        sqlx::query("CREATE TABLE writer_probe(value INTEGER NOT NULL)")
+            .execute(&pool)
+            .await?;
+        let store = super::super::SqliteAdministratorStore::new(pool.clone());
+        let state = store.authentication_state().await?;
+        let mut transaction = pool.begin_with("BEGIN IMMEDIATE").await?;
+        sqlx::query("INSERT INTO writer_probe VALUES(1)")
+            .execute(&mut *transaction)
+            .await?;
+        assert_child_writer(&path, true);
+        for _ in 0..3 {
+            // Each request can construct a fresh store. Reusing `store` would
+            // only hit its OnceLock and never exercise the physical-scope lookup.
+            let next = super::super::SqliteAdministratorStore::new(pool.clone())
+                .authentication_state()
+                .await?;
+            assert!(Arc::ptr_eq(&state, &next));
+            assert_child_writer(&path, true);
+        }
+        transaction.commit().await?;
+        assert_child_writer(&path, false);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM writer_probe")
+                .fetch_one(&pool)
+                .await?,
+            1
+        );
+        pool.close().await;
+        Ok(())
     }
 }

@@ -8,7 +8,7 @@ xcss `1.0.0` 的 `xcss::web_assets` 生成资源表、确定性 JSON 清单和 S
 
 资源清单格式为 `web-assets-v1`，文件按路径排序，绑定路径、MIME、大小和 SHA-256。摘要只计算
 规范的 JSON 字节，不包含 CLI 打印时添加的换行。产品二进制提供无需配置、无业务副作用的
-`web-assets` 命令。实际产物验收将该清单与本次前端输出逐个比较，能够发现旧 dist、遗漏和编译后改动。
+同次 build.rs 导出的资源清单与构建身份。实际产物验收静态核对二进制内的清单、摘要及资源字节，并把二进制 SHA256 绑定到构建收据，发现旧 dist、遗漏和编译后改动。
 
 ## 声明构建输入
 
@@ -48,11 +48,11 @@ Axum 用 `response.map(axum::body::Body::from)`；Hyper 用
 ```
 
 bin 所在目录随 npm 软件包根目录变化；根 Web 的 bin 位于 `./node_modules/.bin`。正式模式要求干净
-Git 工作树和完整源码修订号，执行锁定前端安装、前端构建、Linux AMD64 GNU Rust 编译，最后启动
-实际生成的 binary 的 `web-assets` 命令验收。单独 `cargo build` 不能证明 dist 是本次生成的。
+Git 工作树和完整源码修订号，执行锁定前端安装、前端构建、Linux AMD64 GNU Rust 编译，最后静态核对
+实际生成的 binary 内嵌资源与同次编译收据，不启动候选程序。单独 `cargo build` 不能证明 dist 是本次生成的。
 
 产品专用打包器可以把这一步作为子步骤。需要隔离源码归档、离线 vendor、签名或伴随程序的流程，
-继续证明其独有合同，再用共同 `--verify-only --binary <path> --dist <path>` 核对真实 binary。
+继续证明其独有合同，再用共同 `--verify-only --binary <path> --dist <path> --receipt <path>` 核对真实 binary。
 此接口只证明内嵌 Web 与 dist 字节相同，不能代替源码、状态或部署验证。
 
 ## 热更新与正式验收

@@ -6,7 +6,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { assertWebOutput, buildWebServer, parseWebServerBuildConfig, requireServerBuildPlatform, verifyEmbeddedAssets } from "../../../dist/web-toolchain/server.js";
+import { assertWebOutput, buildWebServer, parseWebServerBuildConfig, requireServerBuildPlatform, verifyEmbeddedAssets, verifyWebServerBinary } from "../../../dist/web-toolchain/server.js";
 
 test("server build entry refuses client platforms, ARM64 and non-glibc Linux", () => {
   for (const [property, value] of [["platform", "win32"], ["arch", "arm64"]]) {
@@ -58,6 +58,31 @@ test("linked inputs cannot be used to verify embedded outputs", () => fixture((d
   linkSync(join(directory, "index.html"), join(directory, "hardlink.html"));
   assert.throws(() => verifyEmbeddedAssets(manifest, directory), /Unsafe Web input/);
 }));
+test("binary-bound receipts reject replacement bytes and metadata changes without executing the server", () => fixture((directory, manifest) => {
+  const artifacts = mkdtempSync(join(tmpdir(), "xcss-build-artifacts-"));
+  try {
+  const binary = join(artifacts, "candidate");
+  const payload = `do not execute this file\n${manifest}\n${hash(manifest)}\n${readFileSync(join(directory, "index.html"), "utf8")}`;
+  writeFileSync(binary, payload);
+  const identity = { format: "xssi-build-v1", product: "example", version: "1.0.0", source_revision: "a".repeat(40), target: "x86_64-unknown-linux-gnu", web_assets_sha256: hash(manifest) };
+  const receipt = { format: "xssi-web-build-receipt-v1", binary_sha256: hash(payload), inventory_sha256: hash(manifest), identity_sha256: hash(JSON.stringify(identity)), inventory: JSON.parse(manifest), identity };
+  const path = join(artifacts, "receipt.json");
+  writeFileSync(path, JSON.stringify(receipt));
+  assert.equal(verifyWebServerBinary(binary, directory, path).source_revision, identity.source_revision);
+  writeFileSync(binary, `${payload}\nreplaced code`);
+  assert.throws(() => verifyWebServerBinary(binary, directory, path), /differs from its binary-bound/);
+  writeFileSync(binary, payload);
+  receipt.identity.source_revision = "b".repeat(40);
+  writeFileSync(path, JSON.stringify(receipt));
+  assert.throws(() => verifyWebServerBinary(binary, directory, path), /metadata digest mismatch/);
+  receipt.identity.source_revision = "a".repeat(40);
+  const omittedAsset = `${manifest}\n${hash(manifest)}`;
+  writeFileSync(binary, omittedAsset);
+  receipt.binary_sha256 = hash(omittedAsset);
+  writeFileSync(path, JSON.stringify(receipt));
+  assert.throws(() => verifyWebServerBinary(binary, directory, path), /does not contain compiled Web bytes/);
+  } finally { rmSync(artifacts, { recursive: true, force: true }); }
+}));
 test("declarations reject shell commands and unknown configuration keys", () => {
   const valid = { format: 1, web: { directory: "web", script: "build", dist: "dist" }, rust: { manifest: "Cargo.toml", package: "example", binary: "example", source_revision_env: "SOURCE_REVISION" } };
   assert.deepEqual(parseWebServerBuildConfig(valid), valid);
@@ -65,6 +90,7 @@ test("declarations reject shell commands and unknown configuration keys", () => 
   assert.throws(() => parseWebServerBuildConfig({ ...valid, web: { ...valid.web, script: "build; echo unsafe" } }), /Invalid web.script/);
   assert.throws(() => parseWebServerBuildConfig({ ...valid, web: { ...valid.web, dist: "../src" } }), /canonical relative/);
   assert.throws(() => parseWebServerBuildConfig({ ...valid, rust: { ...valid.rust, manifest: "/etc/Cargo.toml" } }), /canonical relative/);
+  assert.throws(() => parseWebServerBuildConfig({ ...valid, rust: { ...valid.rust, source_revision_env: "HOME" } }), /rust.source_revision_env/);
 });
 test("build output cannot replace source ancestors or another project", () => fixture(directory => {
   const web = join(directory, "web");
@@ -110,16 +136,23 @@ test("the actual build CLI orders Web before Cargo, accepts a development archiv
 mkdirSync(process.env.XCSS_WEB_DIST,{recursive:true});writeFileSync(process.env.XCSS_WEB_DIST+'/index.html','current build');appendFileSync('calls','web\\n');console.log('Web build progress');`);
   const executable = join(directory, "server-fixture.mjs");
   const compiledInventory = JSON.stringify({ format: "web-assets-v1", files: [{ path: "index.html", content_type: "text/html; charset=utf-8", size: Buffer.byteLength("current build"), sha256: hash("current build") }] });
-  writeFileSync(executable, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(compiledInventory)});`);
+  writeFileSync(executable, `#!${process.execPath}\nthrow new Error('candidate executable must never run');\n//${compiledInventory}\n//${hash(compiledInventory)}\n//current build`);
   chmodSync(executable, 0o755);
   const command = join(directory, "commands"); mkdirSync(command);
-  writeFileSync(join(command, "cargo"), `#!${process.execPath}\nimport {readFileSync,appendFileSync} from 'node:fs';
+  writeFileSync(join(command, "cargo"), `#!${process.execPath}\nimport {readFileSync,appendFileSync,writeFileSync} from 'node:fs';
 if(readFileSync(process.env.XCSS_WEB_DIST+'/index.html','utf8')!=='current build')process.exit(2);
 if(process.env.SOURCE_REVISION!=='unbound')process.exit(3);appendFileSync('calls','cargo\\n');
+writeFileSync(process.env.XSSI_BUILD_RECEIPT_DIR+'/example-web-assets.json',${JSON.stringify(compiledInventory)});
+writeFileSync(process.env.XSSI_BUILD_RECEIPT_DIR+'/example-build-identity.json',JSON.stringify({format:'xssi-build-v1',product:'example',version:'1.0.0',source_revision:process.env.SOURCE_REVISION,target:'x86_64-unknown-linux-gnu',web_assets_sha256:${JSON.stringify(hash(compiledInventory))}}));
 console.log(JSON.stringify({reason:'compiler-artifact',target:{name:'example',kind:['bin']},executable:${JSON.stringify(executable)}}));`);
   chmodSync(join(command, "cargo"), 0o755);
   const cli = new URL("../../../dist/web-toolchain/server-cli.js", import.meta.url);
   const output = execFileSync(process.execPath, [fileURLToPath(cli), "--config", join(directory, "xcss-web-build.json"), "--mode", "development", "--no-install"], { cwd: directory, env: { ...process.env, PATH: `${command}:${process.env.PATH}` }, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
   assert.equal(output, `${executable}\n`);
   assert.equal(readFileSync(join(directory, "calls"), "utf8"), "web\ncargo\n");
+  const receipt = `${executable}.xssi-web-build.json`;
+  assert.equal(verifyWebServerBinary(executable, join(directory, "dist"), receipt).source_revision, "unbound");
+  const verify = execFileSync(process.execPath, [fileURLToPath(cli), "--verify-only", "--binary", executable, "--dist", join(directory, "dist"), "--receipt", receipt, "--source-revision", "unbound"], { encoding: "utf8" });
+  assert.equal(JSON.parse(verify).binary_sha256, hash(readFileSync(executable)));
+  assert.throws(() => execFileSync(process.execPath, [fileURLToPath(cli), "--verify-only", "--binary", executable, "--dist", join(directory, "dist")], { stdio: "pipe" }), /Command failed/);
 }));

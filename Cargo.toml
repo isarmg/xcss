@@ -1,5 +1,5 @@
 [package]
-"version" = "1.0.11"
+"version" = "1.0.12"
 "edition" = "2024"
 "rust-version" = "1.99"
 "authors" = ["sarmg <isarmg@163.com>"]
@@ -53,7 +53,6 @@
 "zeroize" = { "version" = "1.8" }
 "aes-gcm" = { "version" = "0.11.1" }
 "hkdf" = { "version" = "0.13.0" }
-"ipnet" = { "version" = "2" }
 "url" = { "version" = "2" }
 "uuid" = { "version" = "1", "features" = ["v4"] }
 "anyhow" = { "version" = "1" }

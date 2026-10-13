@@ -246,7 +246,6 @@ mod tests {
             StaticAdministratorStore::with_persistent_accounts(records.clone(), directory).unwrap(),
         );
         let login_context = LoginContext {
-            source: "127.0.0.1".into(),
             request_id: None,
             now_micros: now(),
         };

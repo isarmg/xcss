@@ -7,12 +7,7 @@ use crate::admin_auth::{
     AdministratorOriginMode, require_canonical_administrator_username,
     require_current_password_hash,
 };
-use std::{
-    collections::{HashMap, VecDeque},
-    fmt,
-    sync::{Arc, Mutex},
-    time::Duration,
-};
+use std::{fmt, sync::Arc, time::Duration};
 use thiserror::Error;
 use tokio::sync::Semaphore;
 
@@ -21,19 +16,14 @@ pub const SESSION_IDLE_MICROS: u64 = 30 * 60 * 1_000_000;
 pub const SESSION_ABSOLUTE_MICROS: u64 = 12 * 60 * 60 * 1_000_000;
 pub const SESSIONS_PER_ADMINISTRATOR: usize = 32;
 pub const SESSIONS_GLOBAL: usize = 1_024;
-pub const LOGIN_WINDOW_MICROS: u64 = 5 * 60 * 1_000_000;
-pub const FAILURES_PER_SOURCE: usize = 20;
-pub const FAILURES_PER_ACCOUNT: usize = 10;
 pub const ARGON2_CONCURRENCY: usize = 2;
 pub const ARGON2_ACQUIRE_TIMEOUT_MICROS: u64 = 2 * 1_000_000;
 pub const SESSION_LAST_SEEN_WRITE_INTERVAL_MICROS: u64 = 60 * 1_000_000;
 pub const DIGEST_BYTES: usize = 32;
 pub const IDENTIFIER_MAX_BYTES: usize = 64;
-pub const MAX_LOGIN_TRACKED_KEYS: usize = 4_096;
 pub const ADMIN_BODY_MAX_BYTES: usize = 16 * 1024;
 pub const ADMIN_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 pub const ADMIN_BODY_READERS_GLOBAL: usize = 32;
-pub const ADMIN_BODY_READERS_PER_SOURCE: usize = 4;
 pub const STATIC_ADMINISTRATORS_MAX: usize = 1;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -54,15 +44,6 @@ impl AdministratorPolicyV1 {
     }
     pub const fn sessions_global(self) -> usize {
         SESSIONS_GLOBAL
-    }
-    pub const fn login_window_micros(self) -> u64 {
-        LOGIN_WINDOW_MICROS
-    }
-    pub const fn failures_per_source(self) -> usize {
-        FAILURES_PER_SOURCE
-    }
-    pub const fn failures_per_account(self) -> usize {
-        FAILURES_PER_ACCOUNT
     }
     pub const fn argon2_concurrency(self) -> usize {
         ARGON2_CONCURRENCY
@@ -347,7 +328,6 @@ pub trait AdministratorStore: Send + Sync {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LoginContext {
-    pub source: String,
     pub request_id: Option<String>,
     pub now_micros: u64,
 }
@@ -355,13 +335,6 @@ pub struct LoginContext {
 impl LoginContext {
     pub fn validate(&self) -> Result<(), Error> {
         require_persistable_time(self.now_micros)?;
-        if self.source.is_empty()
-            || self.source.len() > 256
-            || !self.source.is_ascii()
-            || self.source.bytes().any(|byte| byte.is_ascii_control())
-        {
-            return Err(Error::InvalidLoginSource);
-        }
         if let Some(request_id) = &self.request_id {
             crate::contracts::RequestId::new(request_id.clone())
                 .map_err(|_| Error::InvalidRequestId)?;
@@ -394,19 +367,12 @@ pub struct AuthenticatedIdentity {
     pub csrf_hash: [u8; DIGEST_BYTES],
 }
 
-#[derive(Debug, Default)]
-struct LoginFailures {
-    source: HashMap<[u8; DIGEST_BYTES], VecDeque<u64>>,
-    account: HashMap<[u8; DIGEST_BYTES], VecDeque<u64>>,
-}
-
 /// Complete storage-independent login/session orchestration. HTTP adapters are
 /// intentionally limited to wire validation and error/cookie translation.
 #[derive(Debug)]
 pub struct AdministratorService<Store> {
     store: Store,
     argon2_slots: Arc<Semaphore>,
-    failures: Mutex<LoginFailures>,
 }
 
 impl<Store> AdministratorService<Store>
@@ -417,7 +383,6 @@ where
         Self {
             store,
             argon2_slots: Arc::new(Semaphore::new(ARGON2_CONCURRENCY)),
-            failures: Mutex::new(LoginFailures::default()),
         }
     }
 
@@ -549,15 +514,6 @@ where
         context.validate()?;
         let normalized =
             crate::admin_auth::normalize_administrator_username(username_candidate).ok();
-        let source_key = crate::admin_auth::token_hash(&context.source);
-        let account_key =
-            crate::admin_auth::token_hash(normalized.as_deref().unwrap_or(username_candidate));
-        self.require_login_capacity(source_key, account_key, context.now_micros)
-            .map_err(|error| match error {
-                Error::LoginRateLimited => ServiceError::LoginRateLimited,
-                other => ServiceError::Policy(other),
-            })?;
-
         let administrator = match normalized.as_deref() {
             Some(username) => self
                 .store
@@ -587,7 +543,6 @@ where
         .map_err(|_| ServiceError::AuthenticationWorkerFailed)?;
         let Some(administrator) = administrator.filter(|value| value.active && password_matches)
         else {
-            self.record_login_failure(source_key, account_key, context.now_micros)?;
             return Err(ServiceError::InvalidCredentials);
         };
 
@@ -630,7 +585,6 @@ where
             })
             .await
             .map_err(ServiceError::Store)?;
-        self.clear_login_failures(source_key, account_key)?;
         Ok(AuthenticatedSession {
             administrator: crate::contracts::AdministratorSession::new(
                 administrator.administrator_id.as_str(),
@@ -805,77 +759,9 @@ where
         )
         .map_err(ServiceError::Authentication)
     }
-
-    fn require_login_capacity(
-        &self,
-        source: [u8; 32],
-        account: [u8; 32],
-        now: u64,
-    ) -> Result<(), Error> {
-        let mut failures = self
-            .failures
-            .lock()
-            .map_err(|_| Error::LoginLimiterPoisoned)?;
-        prune_failures(&mut failures, now);
-        if failures
-            .source
-            .get(&source)
-            .is_some_and(|values| values.len() >= FAILURES_PER_SOURCE)
-            || failures
-                .account
-                .get(&account)
-                .is_some_and(|values| values.len() >= FAILURES_PER_ACCOUNT)
-            || (!failures.source.contains_key(&source)
-                && failures.source.len() >= MAX_LOGIN_TRACKED_KEYS)
-            || (!failures.account.contains_key(&account)
-                && failures.account.len() >= MAX_LOGIN_TRACKED_KEYS)
-        {
-            Err(Error::LoginRateLimited)
-        } else {
-            Ok(())
-        }
-    }
-
-    fn record_login_failure(
-        &self,
-        source: [u8; 32],
-        account: [u8; 32],
-        now: u64,
-    ) -> Result<(), Error> {
-        let mut failures = self
-            .failures
-            .lock()
-            .map_err(|_| Error::LoginLimiterPoisoned)?;
-        prune_failures(&mut failures, now);
-        failures.source.entry(source).or_default().push_back(now);
-        failures.account.entry(account).or_default().push_back(now);
-        Ok(())
-    }
-
-    fn clear_login_failures(&self, source: [u8; 32], account: [u8; 32]) -> Result<(), Error> {
-        let mut failures = self
-            .failures
-            .lock()
-            .map_err(|_| Error::LoginLimiterPoisoned)?;
-        failures.source.remove(&source);
-        failures.account.remove(&account);
-        Ok(())
-    }
 }
 
 const DUMMY_PASSWORD_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$MDEyMzQ1Njc4OWFiY2RlZg$5ZQ3RjSgS3eazD2qv8ZO2Cm50ONQ2RplT/MMLbScSMU";
-
-fn prune_failures(failures: &mut LoginFailures, now: u64) {
-    let threshold = now.saturating_sub(LOGIN_WINDOW_MICROS);
-    for entries in [&mut failures.source, &mut failures.account] {
-        entries.retain(|_, times| {
-            while times.front().is_some_and(|value| *value <= threshold) {
-                times.pop_front();
-            }
-            !times.is_empty()
-        });
-    }
-}
 
 fn security_event(
     action: SecurityAction,
@@ -920,8 +806,6 @@ where
     AdministratorNotFound,
     #[error("administrator credentials are invalid")]
     InvalidCredentials,
-    #[error("administrator login is temporarily rate limited")]
-    LoginRateLimited,
     #[error("password verification capacity is temporarily exhausted")]
     AuthenticationBusy,
     #[error("password verification worker exited unexpectedly")]
@@ -1021,14 +905,8 @@ pub enum Error {
     InvalidSessionRecord,
     #[error("security audit event violates current policy")]
     InvalidAuditEvent,
-    #[error("login source is invalid")]
-    InvalidLoginSource,
     #[error("request ID is invalid")]
     InvalidRequestId,
-    #[error("administrator login is rate limited")]
-    LoginRateLimited,
-    #[error("login limiter state lock was poisoned")]
-    LoginLimiterPoisoned,
     #[error(transparent)]
     Authentication(#[from] crate::admin_auth::Error),
 }

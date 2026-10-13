@@ -8,6 +8,16 @@ use crate::web_assets::{
 use anyhow::{Context, Result, ensure};
 use std::{env, fs, path::Path};
 
+#[derive(serde::Serialize)]
+struct BuildIdentity<'a> {
+    format: &'a str,
+    product: String,
+    version: String,
+    source_revision: String,
+    target: String,
+    web_assets_sha256: &'a str,
+}
+
 /// Generate `OUT_DIR/xcss-web-assets.rs`, exporting `ASSETS`, `MANIFEST`, and `DIGEST`.
 /// Cargo watches the source directories and files, including additions/removals.
 pub fn generate(root: impl AsRef<Path>) -> Result<()> {
@@ -17,8 +27,53 @@ pub fn generate(root: impl AsRef<Path>) -> Result<()> {
 /// Generate a separately named source file, useful for independent Web entry points.
 /// Each included module exports the same three names. `filename` must be one safe name.
 pub fn generate_to(root: impl AsRef<Path>, filename: &str) -> Result<()> {
+    println!("cargo:rerun-if-env-changed=XSSI_BUILD_RECEIPT_DIR");
+    println!("cargo:rerun-if-env-changed=XSSI_BUILD_SOURCE_REVISION");
     let output = env::var_os("OUT_DIR").context("OUT_DIR is required in a Cargo build script")?;
-    generate_at(root.as_ref(), Path::new(&output), filename)
+    generate_at(root.as_ref(), Path::new(&output), filename)?;
+    if let Some(destination) = env::var_os("XSSI_BUILD_RECEIPT_DIR") {
+        ensure!(
+            filename == "xcss-web-assets.rs",
+            "build receipt requires the primary Web inventory"
+        );
+        let directory = crate::fs_safety::PrivateDirectory::open_existing(&destination)?;
+        directory.verify_identity()?;
+        let product = env::var("CARGO_PKG_NAME").context("Cargo product identity is required")?;
+        ensure!(
+            safe_relative(&product) && !product.contains('/'),
+            "unsafe Cargo product identity"
+        );
+        let manifest = fs::read(Path::new(&output).join(format!("{filename}.manifest.json")))?;
+        let digest = sha256(&manifest);
+        let source_revision = env::var("XSSI_BUILD_SOURCE_REVISION")
+            .context("build receipt source identity is required")?;
+        ensure!(
+            (source_revision == "unbound" && env::var("PROFILE").as_deref() == Ok("debug"))
+                || (source_revision.len() == 40
+                    && source_revision
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))),
+            "build receipt source identity must match a bound release or unbound development build"
+        );
+        let identity = BuildIdentity {
+            format: "xssi-build-v1",
+            product: product.clone(),
+            version: env::var("CARGO_PKG_VERSION").context("Cargo version is required")?,
+            source_revision,
+            target: env::var("TARGET").context("Cargo target is required")?,
+            web_assets_sha256: &digest,
+        };
+        fs::write(
+            Path::new(&destination).join(format!("{product}-web-assets.json")),
+            manifest,
+        )?;
+        fs::write(
+            Path::new(&destination).join(format!("{product}-build-identity.json")),
+            serde_json::to_vec(&identity)?,
+        )?;
+        directory.verify_identity()?;
+    }
+    Ok(())
 }
 
 /// Explicit output location for build tools and acceptance tests; no environment mutation.

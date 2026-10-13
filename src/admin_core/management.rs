@@ -76,10 +76,6 @@ impl<Store: AdministratorStore + 'static> AdministratorService<Store> {
         if !record.active || record.administrator_id != context.identity.administrator_id {
             return Err(ManagementError::Unauthorized);
         }
-        let account_key = crate::admin_auth::token_hash(&record.username);
-        let source_key = crate::admin_auth::token_hash(context.identity.session_id.as_str());
-        self.require_login_capacity(source_key, account_key, context.now_micros)
-            .map_err(|_| ManagementError::Busy)?;
         let permit = tokio::time::timeout(
             Duration::from_micros(ARGON2_ACQUIRE_TIMEOUT_MICROS),
             self.argon2_slots.clone().acquire_owned(),
@@ -97,8 +93,6 @@ impl<Store: AdministratorStore + 'static> AdministratorService<Store> {
         .await
         .map_err(|_| ManagementError::Busy)?;
         if !matches {
-            self.record_login_failure(source_key, account_key, context.now_micros)
-                .map_err(|_| ManagementError::Busy)?;
             return Err(ManagementError::InvalidCurrentPassword);
         }
         let password_hash = match new_password {

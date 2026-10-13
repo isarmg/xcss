@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
+import { existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { WEB_TOOLCHAIN } from "./index.js";
 
@@ -19,6 +20,23 @@ export interface WebServerBuildOptions {
   cargoArgs?: string[];
 }
 interface AssetFile { path: string; content_type: string; size: number; sha256: string }
+interface BuildIdentity {
+  format: "xssi-build-v1";
+  product: string;
+  version: string;
+  source_revision: string;
+  target: "x86_64-unknown-linux-gnu";
+  web_assets_sha256: string;
+}
+interface BuildReceipt {
+  format: "xssi-web-build-receipt-v1";
+  binary_sha256: string;
+  inventory_sha256: string;
+  identity_sha256: string;
+  inventory: { format: string; files: AssetFile[] };
+  identity: BuildIdentity;
+}
+const digest = (bytes: string | Buffer): string => createHash("sha256").update(bytes).digest("hex");
 
 function within(root: string, path: string): string {
   if (!path || isAbsolute(path)) throw new Error(`Expected a relative project path: ${path}`);
@@ -74,11 +92,12 @@ export function parseWebServerBuildConfig(value: unknown): WebServerBuildConfig 
   for (const [key, entry] of Object.entries(value.rust)) {
     if (typeof entry !== "string" || !entry || (key !== "manifest" && !/^[a-zA-Z0-9_-]+$/.test(entry))) throw new Error(`Invalid rust.${key}`);
   }
+  if (typeof value.rust.source_revision_env !== "string" || !/^(?:SOURCE_REVISION|[A-Z][A-Z0-9_]*_SOURCE_REVISION)$/.test(value.rust.source_revision_env)) throw new Error("Invalid rust.source_revision_env");
   if (!canonicalPath(value.web.directory, true) || !canonicalPath(value.web.dist) || !canonicalPath(value.rust.manifest)) throw new Error("Build paths must be canonical relative paths");
   return value as unknown as WebServerBuildConfig;
 }
 
-/** Validate the bytes exposed by the actual executable, not merely a sibling manifest. */
+/** Validate the exact inventory generated beside the Rust include_bytes snapshots. */
 export function verifyEmbeddedAssets(manifestBytes: string, directory: string): { sha256: string; files: number } {
   if (manifestBytes.endsWith("\n")) manifestBytes = manifestBytes.slice(0, -1);
   const manifest = JSON.parse(manifestBytes) as { format?: string; files?: AssetFile[] };
@@ -119,11 +138,45 @@ function run(command: string, args: string[], cwd: string, environment: NodeJS.P
   return result.stdout ?? "";
 }
 
-/** Shared acceptance hook for packagers that already verified an isolated source archive. */
-export function verifyWebServerBinary(binary: string, directory: string): { sha256: string; files: number } {
-  const executable = realpathSync(binary);
-  const inventory = run(executable, ["web-assets"], dirname(executable), process.env, true);
-  return verifyEmbeddedAssets(inventory, directory);
+function readArtifact(path: string, limit: number): Buffer {
+  const metadata = lstatSync(path);
+  if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > limit) throw new Error(`Unsafe build artifact: ${path}`);
+  const bytes = readFileSync(path);
+  if (bytes.length !== metadata.size) throw new Error(`Build artifact changed while reading: ${path}`);
+  return bytes;
+}
+function validateIdentity(value: unknown): asserts value is BuildIdentity {
+  exactKeys(value, ["format", "product", "version", "source_revision", "target", "web_assets_sha256"]);
+  if (value.format !== "xssi-build-v1" || typeof value.product !== "string" || !/^[a-z0-9_-]+$/.test(value.product) ||
+      typeof value.version !== "string" || !/^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(value.version) ||
+      typeof value.source_revision !== "string" || (value.source_revision !== "unbound" && !/^[0-9a-f]{40}$/.test(value.source_revision)) ||
+      value.target !== "x86_64-unknown-linux-gnu" || typeof value.web_assets_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(value.web_assets_sha256)) throw new Error("Invalid compiled build identity");
+}
+function verifyCompiledPayload(binary: string, directory: string, inventory: string): { sha256: string; files: number; binary_sha256: string } {
+  const verified = verifyEmbeddedAssets(inventory, directory);
+  const bytes = readArtifact(binary, 1024 * 1024 * 1024);
+  if (!bytes.includes(Buffer.from(inventory)) || !bytes.includes(Buffer.from(verified.sha256))) throw new Error("Executable does not contain the compiled Web inventory and digest");
+  const files = (JSON.parse(inventory) as { files: AssetFile[] }).files;
+  for (const file of files) {
+    if (!bytes.includes(readArtifact(resolve(directory, file.path), 256 * 1024 * 1024))) throw new Error(`Executable does not contain compiled Web bytes: ${file.path}`);
+  }
+  return { ...verified, binary_sha256: digest(bytes) };
+}
+/** Verify a receipt bound to a trusted build without executing the candidate server. */
+export function verifyWebServerBinary(binary: string, directory: string, receiptFile: string): { sha256: string; files: number; binary_sha256: string; source_revision: string } {
+  const encoded = readArtifact(receiptFile, 16 * 1024 * 1024).toString("utf8");
+  const receipt = JSON.parse(encoded) as BuildReceipt;
+  exactKeys(receipt, ["format", "binary_sha256", "inventory_sha256", "identity_sha256", "inventory", "identity"]);
+  if (receipt.format !== "xssi-web-build-receipt-v1" || JSON.stringify(receipt) !== encoded ||
+      ![receipt.binary_sha256, receipt.inventory_sha256, receipt.identity_sha256].every(value => typeof value === "string" && /^[0-9a-f]{64}$/.test(value))) throw new Error("Invalid binary-bound build receipt");
+  validateIdentity(receipt.identity);
+  const inventory = JSON.stringify(receipt.inventory);
+  const identity = JSON.stringify(receipt.identity);
+  if (digest(inventory) !== receipt.inventory_sha256 || digest(identity) !== receipt.identity_sha256 ||
+      receipt.identity.web_assets_sha256 !== receipt.inventory_sha256) throw new Error("Build receipt metadata digest mismatch");
+  const verified = verifyCompiledPayload(binary, directory, inventory);
+  if (verified.binary_sha256 !== receipt.binary_sha256) throw new Error("Executable differs from its binary-bound build receipt");
+  return { ...verified, source_revision: receipt.identity.source_revision };
 }
 
 /** One ordered build contract shared by every embedded Web consumer. */
@@ -169,17 +222,41 @@ export function buildWebServer(configFile: string, options: WebServerBuildOption
   if (cargoArgs.some(arg => ["--manifest-path", "--package", "-p", "--target", "--message-format", "--config"].includes(arg) || /^--(?:manifest-path|package|target|message-format|config)=/.test(arg))) throw new Error("Cargo arguments may not override the declared build contract");
   const args = ["build", "--locked", "--manifest-path", manifest, "--package", config.rust.package, "--bin", config.rust.binary,
     "--target", "x86_64-unknown-linux-gnu", "--message-format=json-render-diagnostics", ...(options.mode === "release" ? ["--release"] : []), ...cargoArgs];
-  const output = run("cargo", args, root, environment, true);
-  const candidates = new Set<string>();
-  for (const line of output.split("\n")) {
-    if (!line.trim()) continue;
-    const message = JSON.parse(line) as { reason: string; target?: { name: string; kind: string[] }; executable?: string; message?: { rendered?: string } };
-    if (message.reason === "compiler-message" && message.message?.rendered) process.stderr.write(message.message.rendered);
-    if (message.reason === "compiler-artifact" && message.target?.name === config.rust.binary && message.target.kind.includes("bin") && message.executable) candidates.add(realpathSync(message.executable));
-  }
-  if (candidates.size !== 1) throw new Error(`Cargo reported ${candidates.size} executable candidates`);
-  const binary = [...candidates][0]!;
-  const verified = verifyWebServerBinary(binary, dist);
-  process.stderr.write(`Embedded Web verified: ${verified.files} files, SHA-256 ${verified.sha256}\n`);
-  return binary;
+  const metadata = realpathSync(mkdtempSync(resolve(tmpdir(), "xssi-web-build-")));
+  environment.XSSI_BUILD_RECEIPT_DIR = metadata;
+  environment.XSSI_BUILD_SOURCE_REVISION = environment[config.rust.source_revision_env];
+  try {
+    const output = run("cargo", args, root, environment, true);
+    const candidates = new Set<string>();
+    for (const line of output.split("\n")) {
+      if (!line.trim()) continue;
+      const message = JSON.parse(line) as { reason: string; target?: { name: string; kind: string[] }; executable?: string; message?: { rendered?: string } };
+      if (message.reason === "compiler-message" && message.message?.rendered) process.stderr.write(message.message.rendered);
+      if (message.reason === "compiler-artifact" && message.target?.name === config.rust.binary && message.target.kind.includes("bin") && message.executable) candidates.add(realpathSync(message.executable));
+    }
+    if (candidates.size !== 1) throw new Error(`Cargo reported ${candidates.size} executable candidates`);
+    const binary = [...candidates][0]!;
+    const inventory = readArtifact(resolve(metadata, `${config.rust.package}-web-assets.json`), 16 * 1024 * 1024).toString("utf8");
+    const identityBytes = readArtifact(resolve(metadata, `${config.rust.package}-build-identity.json`), 16 * 1024 * 1024).toString("utf8");
+    const identity: unknown = JSON.parse(identityBytes);
+    validateIdentity(identity);
+    if (JSON.stringify(identity) !== identityBytes || identity.product !== config.rust.package ||
+        identity.source_revision !== environment[config.rust.source_revision_env] || identity.web_assets_sha256 !== digest(inventory)) throw new Error("Compiled identity differs from the requested source build");
+    const verified = verifyCompiledPayload(binary, dist, inventory);
+    if (options.mode === "release" && (run("git", ["rev-parse", "HEAD"], root, environment, true).trim() !== identity.source_revision ||
+        run("git", ["status", "--porcelain=v1", "--untracked-files=all"], root, environment, true).trim())) throw new Error("Release source changed during compilation");
+    const receipt: BuildReceipt = { format: "xssi-web-build-receipt-v1", binary_sha256: verified.binary_sha256,
+      inventory_sha256: verified.sha256, identity_sha256: digest(identityBytes), inventory: JSON.parse(inventory) as BuildReceipt["inventory"], identity };
+    const receiptFile = `${binary}.xssi-web-build.json`;
+    const temporaryReceipt = `${receiptFile}.tmp-${randomUUID()}`;
+    try {
+      writeFileSync(temporaryReceipt, JSON.stringify(receipt), { flag: "wx", mode: 0o600 });
+      const previousReceipt = lstatSync(receiptFile, { throwIfNoEntry: false });
+      if (previousReceipt && (!previousReceipt.isFile() || previousReceipt.isSymbolicLink())) throw new Error("Unsafe build receipt output");
+      renameSync(temporaryReceipt, receiptFile);
+    } finally { rmSync(temporaryReceipt, { force: true }); }
+    verifyWebServerBinary(binary, dist, receiptFile);
+    process.stderr.write(`Embedded Web verified: ${verified.files} files, SHA-256 ${verified.sha256}; receipt ${receiptFile}\n`);
+    return binary;
+  } finally { rmSync(metadata, { recursive: true, force: true }); }
 }

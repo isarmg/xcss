@@ -5,6 +5,7 @@ const options: WebServerBuildOptions = { mode: "development", cargoArgs: [] };
 let config = "xcss-web-build.json";
 let verifyOnly = false;
 let binaryToVerify: string | undefined;
+let receipt: string | undefined;
 try {
   requireServerBuildPlatform();
   const args = process.argv.slice(2);
@@ -14,11 +15,12 @@ try {
     else if (arg === "--verify-only") verifyOnly = true;
     else if (arg === "--rust-only") options.rustOnly = true;
     else if (arg === "--no-install") options.noInstall = true;
-    else if (["--config", "--mode", "--dist", "--source-revision", "--cargo-arg", "--binary"].includes(arg ?? "")) {
+    else if (["--config", "--mode", "--dist", "--source-revision", "--cargo-arg", "--binary", "--receipt"].includes(arg ?? "")) {
       const value = args[++index];
       if (!value) throw new Error(`Missing value for ${arg}`);
       if (arg === "--config") config = value;
       else if (arg === "--binary") binaryToVerify = value;
+      else if (arg === "--receipt") receipt = value;
       else if (arg === "--mode") {
         if (value !== "development" && value !== "release") throw new Error("Mode must be development or release");
         options.mode = value;
@@ -28,11 +30,13 @@ try {
     } else throw new Error(`Unknown argument: ${arg}`);
   }
   if (verifyOnly) {
-    if (!binaryToVerify || !options.dist || options.webOnly || options.rustOnly) throw new Error("verify-only requires binary and dist without build-step options");
-    process.stdout.write(`${JSON.stringify(verifyWebServerBinary(binaryToVerify, options.dist))}\n`);
+    if (!binaryToVerify || !options.dist || !receipt || options.webOnly || options.rustOnly) throw new Error("verify-only requires binary, dist and receipt without build-step options");
+    const verified = verifyWebServerBinary(binaryToVerify, options.dist, receipt);
+    if (options.sourceRevision && options.sourceRevision !== verified.source_revision) throw new Error("Receipt source revision differs from requested source");
+    process.stdout.write(`${JSON.stringify(verified)}\n`);
     process.exit(0);
   }
-  if (binaryToVerify) throw new Error("binary requires verify-only");
+  if (binaryToVerify || receipt) throw new Error("binary and receipt require verify-only");
   const binary = buildWebServer(config, options);
   if (binary) process.stdout.write(`${binary}\n`);
 } catch (error) {

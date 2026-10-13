@@ -66,9 +66,10 @@ impl ProductDescriptor {
                 return Err(Error::InvalidDescriptor(label));
             }
         }
-        if self.common_revision.len() != 40
-            || !self.common_revision.bytes().all(|b| b.is_ascii_hexdigit())
-        {
+        let bound = self.common_revision.len() == 40
+            && self.common_revision.bytes().all(|b| b.is_ascii_hexdigit());
+        let development = cfg!(debug_assertions) && self.common_revision == "unbound";
+        if !bound && !development {
             return Err(Error::InvalidDescriptor("common_revision"));
         }
         Ok(())

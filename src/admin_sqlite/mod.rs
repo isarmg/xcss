@@ -7,10 +7,63 @@ use crate::admin_core::{
     SESSIONS_GLOBAL, SESSIONS_PER_ADMINISTRATOR, SecurityAction, SecurityAuditEvent,
     SessionAndAdministrator, SessionRecord,
 };
-use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Row, Sqlite, SqliteConnection, SqlitePool, Transaction};
 use thiserror::Error;
 
 pub const ADMIN_PERSISTENT_DDL: &str = include_str!("../../schemas/admin/persistent-v1.sql");
+
+/// Validate the existing account in an already-open read-only snapshot.
+/// Does not open another database, initialize tables or change persistent state.
+pub async fn validate_administrators_on_connection(
+    connection: &mut SqliteConnection,
+) -> Result<(), Error> {
+    let rows = sqlx::query(
+        "SELECT administrator_id, username, password_hash, active, session_version, \
+                created_at_micros, updated_at_micros, last_login_at_micros \
+         FROM _common_administrators ORDER BY administrator_id LIMIT 2",
+    )
+    .fetch_all(connection)
+    .await?;
+    if rows.len() != 1 {
+        return Err(Error::ExpectedSingleActiveAdministrator);
+    }
+    if !administrator_from_row(&rows[0])?.active {
+        return Err(Error::ExpectedSingleActiveAdministrator);
+    }
+    Ok(())
+}
+
+/// Insert the sole administrator inside the caller's initialization/migration
+/// transaction, preserving a supplied stable identity and password hash.
+pub async fn insert_administrator_on_connection(
+    connection: &mut SqliteConnection,
+    administrator: &AdministratorRecord,
+) -> Result<(), Error> {
+    administrator.validate()?;
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _common_administrators")
+        .fetch_one(&mut *connection)
+        .await?;
+    if count != 0 {
+        return Err(Error::AdministratorAlreadyExists);
+    }
+    sqlx::query(
+        "INSERT INTO _common_administrators(\
+            administrator_id, username, password_hash, active, session_version, \
+            created_at_micros, updated_at_micros, last_login_at_micros\
+         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(administrator.administrator_id.as_str())
+    .bind(&administrator.username)
+    .bind(&administrator.password_hash)
+    .bind(i64::from(administrator.active))
+    .bind(to_i64(administrator.session_version)?)
+    .bind(to_i64(administrator.created_at_micros)?)
+    .bind(to_i64(administrator.updated_at_micros)?)
+    .bind(optional_i64(administrator.last_login_at_micros)?)
+    .execute(connection)
+    .await?;
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct SqliteAdministratorStore {
@@ -42,20 +95,8 @@ impl SqliteAdministratorStore {
     /// identity and password-hash contract before a server starts accepting
     /// requests.
     pub async fn validate_all_administrators(&self) -> Result<(), Error> {
-        let rows = sqlx::query(
-            "SELECT administrator_id, username, password_hash, active, session_version, \
-                    created_at_micros, updated_at_micros, last_login_at_micros \
-             FROM _common_administrators ORDER BY administrator_id LIMIT 2",
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        if rows.len() != 1 {
-            return Err(Error::ExpectedSingleActiveAdministrator);
-        }
-        if !administrator_from_row(&rows[0])?.active {
-            return Err(Error::ExpectedSingleActiveAdministrator);
-        }
-        Ok(())
+        let mut connection = self.pool.acquire().await?;
+        validate_administrators_on_connection(&mut connection).await
     }
 }
 
@@ -132,28 +173,7 @@ impl AdministratorStore for SqliteAdministratorStore {
         administrator.validate()?;
         require_action(&event, SecurityAction::AdministratorCreated)?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _common_administrators")
-            .fetch_one(&mut *transaction)
-            .await?;
-        if count != 0 {
-            return Err(Error::AdministratorAlreadyExists);
-        }
-        sqlx::query(
-            "INSERT INTO _common_administrators(\
-                administrator_id, username, password_hash, active, session_version, \
-                created_at_micros, updated_at_micros, last_login_at_micros\
-             ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(administrator.administrator_id.as_str())
-        .bind(&administrator.username)
-        .bind(&administrator.password_hash)
-        .bind(i64::from(administrator.active))
-        .bind(to_i64(administrator.session_version)?)
-        .bind(to_i64(administrator.created_at_micros)?)
-        .bind(to_i64(administrator.updated_at_micros)?)
-        .bind(optional_i64(administrator.last_login_at_micros)?)
-        .execute(&mut *transaction)
-        .await?;
+        insert_administrator_on_connection(&mut transaction, &administrator).await?;
         insert_audit(&mut transaction, &event).await?;
         transaction.commit().await?;
         Ok(())

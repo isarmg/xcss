@@ -11,7 +11,7 @@
 | Web 导出或静态资源缺失 | 重新运行公共构建，核对源文件到 dist、exports 和真实 tgz 的对应关系 |
 | Web 资源预算超限 | 定位输出文件大小，拆分或优化内容；需要调整时使用有界 `maxAssetBytes` |
 | `release_verified=false` | 查看报告中的发行清单状态，准备实际制品后运行 `verify-release --require-published` |
-| 内嵌资源与页面不一致 | 对比实际二进制 `web-assets` 输出和本次 dist，重新执行共同构建 |
+| 内嵌资源与页面不一致 | 对比实际二进制与同次构建收据和本次 dist，重新执行共同构建 |
 
 ## 认证请求
 

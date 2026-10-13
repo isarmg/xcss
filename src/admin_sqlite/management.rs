@@ -155,7 +155,6 @@ mod tests {
                 "admin",
                 "correct horse battery",
                 &LoginContext {
-                    source: "127.0.0.1".into(),
                     request_id: None,
                     now_micros: now(),
                 },
@@ -285,7 +284,6 @@ mod tests {
                 "admin",
                 "correct horse battery",
                 &LoginContext {
-                    source: "127.0.0.1".into(),
                     request_id: None,
                     now_micros: now(),
                 },

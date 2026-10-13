@@ -692,7 +692,6 @@ mod tests {
         }])?;
         let service = AdministratorService::new(store);
         let context = LoginContext {
-            source: "127.0.0.1".into(),
             request_id: Some("request-1".into()),
             now_micros: current_time_micros()?,
         };

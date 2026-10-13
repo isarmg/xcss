@@ -1,9 +1,7 @@
 //! Test-only assertions shared by wire adapters and their consumers.
 //! Add this crate as a dev-dependency, never as a production service dependency.
 
-mod deployment;
 mod management;
-pub use deployment::assert_deployment_cli_contract;
 pub use management::assert_administrator_management_http_contract;
 
 use crate::contracts::{
@@ -65,7 +63,7 @@ async fn assert_error(response: Response, status: StatusCode, code: &str) {
 ///
 /// The supplied application must contain the test administrator above and use
 /// loopback-development origin mode. The closure supplies the actual socket
-/// peer through its adapter; proxy-provided source headers are never trusted.
+/// peer through its adapter; network identity is not used for admission.
 pub async fn assert_administrator_http_contract<F, Fut>(send: F, product_id: &str)
 where
     F: Fn(Request<Body>) -> Fut,
@@ -181,9 +179,9 @@ where
     )
     .await;
 
-    // Hold four unfinished readers through the real adapter, not a test-only limiter.
+    // Hold all 32 unfinished readers through the real adapter, not a test-only limiter.
     let mut readers = Vec::new();
-    for _ in 0..4 {
+    for _ in 0..32 {
         let mut pending = Box::pin(send(request(
             Method::POST,
             ADMIN_LOGIN_PATH,
@@ -196,11 +194,11 @@ where
         .await;
         readers.push(pending);
     }
-    let mut fifth = request(Method::POST, ADMIN_LOGIN_PATH, LOGIN_JSON);
-    fifth
+    let mut overflow = request(Method::POST, ADMIN_LOGIN_PATH, LOGIN_JSON);
+    overflow
         .headers_mut()
         .insert("x-forwarded-for", HeaderValue::from_static("192.0.2.77"));
-    let limited = send(fifth).await;
+    let limited = send(overflow).await;
     assert_eq!(limited.headers()[header::RETRY_AFTER], "1");
     assert_error(limited, StatusCode::TOO_MANY_REQUESTS, "auth.body_capacity").await;
     drop(readers);

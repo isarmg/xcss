@@ -200,6 +200,30 @@ impl PrivateDirectory {
     pub fn path(&self) -> &Path {
         &self.path
     }
+    /// Confirm that the named directory still refers to this held handle.
+    pub fn verify_identity(&self) -> Result<(), Error> {
+        let named = std::fs::symlink_metadata(&self.path)?;
+        let held = self.directory.metadata()?;
+        if !named.is_dir() || named.file_type().is_symlink() {
+            return Err(Error::UnsafeFileType(self.path.clone()));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if named.dev() != held.dev() || named.ino() != held.ino() {
+                return Err(Error::UnsafeFileType(self.path.clone()));
+            }
+            let owner = self
+                .administration_owner
+                .map_or_else(|| rustix::process::geteuid().as_raw(), |(uid, _)| uid);
+            if named.uid() != owner || named.mode() & 0o7777 != 0o700 {
+                return Err(Error::UnsafePermissions(self.path.clone()));
+            }
+        }
+        #[cfg(not(unix))]
+        let _ = held;
+        Ok(())
+    }
     pub fn resolve(&self, relative: &RelativePath) -> PathBuf {
         self.path.join(relative.as_path())
     }

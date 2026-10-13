@@ -1,27 +1,21 @@
 //! Bounded readers for untrusted administrator HTTP bodies, shared by both adapters.
 use super::{RequestId, error};
-use crate::admin_core::{
-    ADMIN_BODY_MAX_BYTES, ADMIN_BODY_READERS_GLOBAL, ADMIN_BODY_READERS_PER_SOURCE,
-    ADMIN_BODY_TIMEOUT,
-};
+use crate::admin_core::{ADMIN_BODY_MAX_BYTES, ADMIN_BODY_READERS_GLOBAL, ADMIN_BODY_TIMEOUT};
 use axum::{
     body::{Body, to_bytes},
-    extract::{ConnectInfo, Request},
+    extract::Request,
     http::{HeaderMap, HeaderValue, StatusCode, header},
     response::Response,
 };
 use bytes::Bytes;
 use std::{
-    collections::{HashMap, hash_map::Entry},
     error::Error,
-    net::{IpAddr, SocketAddr},
     sync::{Arc, Mutex},
 };
 
 #[derive(Default)]
 struct Readers {
     total: usize,
-    per_source: HashMap<IpAddr, usize>,
 }
 
 #[derive(Clone, Default)]
@@ -29,7 +23,6 @@ pub(super) struct BodyAdmission(Arc<Mutex<Readers>>);
 
 struct Permit {
     admission: BodyAdmission,
-    source: IpAddr,
 }
 
 impl Drop for Permit {
@@ -37,12 +30,6 @@ impl Drop for Permit {
         // A poisoned budget remains closed; never resume with uncertain counters.
         if let Ok(mut readers) = self.admission.0.lock() {
             readers.total -= 1;
-            if let Entry::Occupied(mut entry) = readers.per_source.entry(self.source) {
-                *entry.get_mut() -= 1;
-                if *entry.get() == 0 {
-                    entry.remove();
-                }
-            }
         }
     }
 }
@@ -75,11 +62,7 @@ impl Scope {
 }
 
 impl BodyAdmission {
-    fn acquire(&self, source: IpAddr, id: Option<&RequestId>) -> Result<Permit, Box<Response>> {
-        let source = match source {
-            IpAddr::V6(value) => value.to_ipv4_mapped().map(IpAddr::V4).unwrap_or(source),
-            _ => source,
-        };
+    fn acquire(&self, id: Option<&RequestId>) -> Result<Permit, Box<Response>> {
         let mut readers = self.0.lock().map_err(|_| {
             Box::new(error(
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -88,10 +71,7 @@ impl BodyAdmission {
                 id,
             ))
         })?;
-        if readers.total >= ADMIN_BODY_READERS_GLOBAL
-            || readers.per_source.get(&source).copied().unwrap_or_default()
-                >= ADMIN_BODY_READERS_PER_SOURCE
-        {
+        if readers.total >= ADMIN_BODY_READERS_GLOBAL {
             let mut response = error(
                 StatusCode::TOO_MANY_REQUESTS,
                 "auth.body_capacity",
@@ -104,10 +84,8 @@ impl BodyAdmission {
             return Err(Box::new(response));
         }
         readers.total += 1;
-        *readers.per_source.entry(source).or_default() += 1;
         Ok(Permit {
             admission: self.clone(),
-            source,
         })
     }
 
@@ -121,20 +99,7 @@ impl BodyAdmission {
         if json {
             require_json_content_type(request.headers(), scope, id)?;
         }
-        let peer = request
-            .extensions()
-            .get::<ConnectInfo<SocketAddr>>()
-            .ok_or_else(|| {
-                Box::new(error(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "platform.peer_missing",
-                    false,
-                    id,
-                ))
-            })?
-            .0
-            .ip();
-        let _permit = self.acquire(peer, id)?;
+        let _permit = self.acquire(id)?;
         read_bounded(request.into_body(), scope, id).await
     }
 }
@@ -229,60 +194,27 @@ mod tests {
     }
 
     fn request(body: Body) -> Request {
-        let mut request = Request::builder()
+        Request::builder()
             .header(header::CONTENT_TYPE, "application/json")
             .body(body)
-            .unwrap();
-        request
-            .extensions_mut()
-            .insert(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 1))));
-        request
+            .unwrap()
     }
 
     #[test]
-    fn source_global_and_mapped_address_budgets_release_without_retaining_keys() {
+    fn global_budget_releases_permits_without_source_identity() {
         let admission = BodyAdmission::default();
         let mut permits = Vec::new();
-        for _ in 0..ADMIN_BODY_READERS_PER_SOURCE {
-            permits.push(
-                admission
-                    .acquire("127.0.0.1".parse().unwrap(), None)
-                    .unwrap(),
-            );
+        for _ in 0..ADMIN_BODY_READERS_GLOBAL {
+            permits.push(admission.acquire(None).unwrap());
         }
         assert_eq!(
-            admission
-                .acquire("::ffff:127.0.0.1".parse().unwrap(), None)
-                .err()
-                .unwrap()
-                .status(),
+            admission.acquire(None).err().unwrap().status(),
             StatusCode::TOO_MANY_REQUESTS
         );
         permits.pop();
-        permits.push(
-            admission
-                .acquire("::ffff:127.0.0.1".parse().unwrap(), None)
-                .unwrap(),
-        );
-        for index in 2..=(ADMIN_BODY_READERS_GLOBAL - ADMIN_BODY_READERS_PER_SOURCE + 1) {
-            permits.push(
-                admission
-                    .acquire(IpAddr::from([127, 0, 0, index as u8]), None)
-                    .unwrap(),
-            );
-        }
-        assert_eq!(
-            admission
-                .acquire("192.0.2.1".parse().unwrap(), None)
-                .err()
-                .unwrap()
-                .status(),
-            StatusCode::TOO_MANY_REQUESTS
-        );
+        permits.push(admission.acquire(None).unwrap());
         drop(permits);
-        let readers = admission.0.lock().unwrap();
-        assert_eq!(readers.total, 0);
-        assert!(readers.per_source.is_empty());
+        assert_eq!(admission.0.lock().unwrap().total, 0);
     }
 
     #[tokio::test(start_paused = true)]

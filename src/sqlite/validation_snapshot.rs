@@ -52,6 +52,33 @@ impl ValidationSnapshot {
         path: impl AsRef<Path>,
         limits: SnapshotLimits,
     ) -> Result<Self, SnapshotError> {
+        Self::capture_at(path, limits, None)
+    }
+
+    pub fn capture_in(
+        path: impl AsRef<Path>,
+        temporary_root: impl AsRef<Path>,
+    ) -> Result<Self, SnapshotError> {
+        Self::capture_at(
+            path,
+            SnapshotLimits::default(),
+            Some(temporary_root.as_ref()),
+        )
+    }
+
+    pub fn capture_with_limits_in(
+        path: impl AsRef<Path>,
+        limits: SnapshotLimits,
+        temporary_root: impl AsRef<Path>,
+    ) -> Result<Self, SnapshotError> {
+        Self::capture_at(path, limits, Some(temporary_root.as_ref()))
+    }
+
+    fn capture_at(
+        path: impl AsRef<Path>,
+        limits: SnapshotLimits,
+        temporary_root: Option<&Path>,
+    ) -> Result<Self, SnapshotError> {
         if limits.max_total_bytes == 0
             || limits.timeout.is_zero()
             || limits.attempts == 0
@@ -67,7 +94,7 @@ impl ValidationSnapshot {
             return Err(SnapshotError::UnsafeSource);
         }
         for attempt in 0..limits.attempts {
-            match capture_once(path, limits.max_total_bytes, deadline) {
+            match capture_once(path, limits.max_total_bytes, deadline, temporary_root) {
                 Err(SnapshotError::SourceChanged) if attempt + 1 < limits.attempts => {
                     std::thread::yield_now()
                 }
@@ -285,6 +312,7 @@ fn capture_once(
     path: &Path,
     budget: u64,
     deadline: Instant,
+    temporary_root: Option<&Path>,
 ) -> Result<ValidationSnapshot, SnapshotError> {
     check_deadline(deadline)?;
     let parent_path = path.parent().ok_or(SnapshotError::UnsafeSource)?;
@@ -319,11 +347,23 @@ fn capture_once(
     if total == 0 {
         return Err(SnapshotError::InvalidDatabase);
     }
-    let directory = Arc::new(
-        tempfile::Builder::new()
-            .prefix("xcss-sqlite-validation-")
-            .tempdir()?,
-    );
+    let mut builder = tempfile::Builder::new();
+    builder.prefix(".sqlite-validation-");
+    let directory = Arc::new(match temporary_root {
+        Some(root) => {
+            let directory = crate::fs_safety::PrivateDirectory::open_existing(root)
+                .map_err(|_| SnapshotError::UnsafeSource)?;
+            directory
+                .verify_identity()
+                .map_err(|_| SnapshotError::UnsafeSource)?;
+            let temporary = builder.tempdir_in(root)?;
+            directory
+                .verify_identity()
+                .map_err(|_| SnapshotError::UnsafeSource)?;
+            temporary
+        }
+        None => builder.tempdir()?,
+    });
     let database = directory.path().join("database.sqlite3");
     let mut expected = Vec::new();
     for (source, target) in [
@@ -487,6 +527,50 @@ pub enum SnapshotError {
 mod tests {
     use super::*;
     use std::os::unix::fs::symlink;
+
+    #[tokio::test]
+    async fn explicit_private_run_directory_keeps_limits_and_cleans_temporary_files() {
+        let root = tempfile::tempdir().unwrap();
+        let run = root.path().join("run");
+        let held = crate::fs_safety::PrivateDirectory::create(&run).unwrap();
+        let source = root.path().join("source.sqlite3");
+        let pool = crate::sqlite::create_if_missing(&source, crate::sqlite::PoolOptions::new(1))
+            .await
+            .unwrap();
+        sqlx::raw_sql("CREATE TABLE records(value INTEGER);INSERT INTO records VALUES(7)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let before = generation_bytes(&source);
+        assert!(matches!(
+            ValidationSnapshot::capture_with_limits_in(
+                &source,
+                SnapshotLimits {
+                    max_total_bytes: 1,
+                    ..SnapshotLimits::default()
+                },
+                &run
+            ),
+            Err(SnapshotError::BudgetExceeded)
+        ));
+        let snapshot = ValidationSnapshot::capture_in(&source, &run).unwrap();
+        assert!(snapshot.database_path().starts_with(&run));
+        let snapshot = snapshot.into_pool().await.unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT value FROM records")
+                .fetch_one(snapshot.pool())
+                .await
+                .unwrap(),
+            7
+        );
+        snapshot.close().await;
+        assert_eq!(before, generation_bytes(&source));
+        assert_eq!(fs::read_dir(&run).unwrap().count(), 0);
+        fs::rename(&run, root.path().join("old-run")).unwrap();
+        crate::fs_safety::PrivateDirectory::create(&run).unwrap();
+        assert!(held.verify_identity().is_err());
+    }
 
     #[tokio::test]
     async fn connection_limits_survive_pool_replacement_without_touching_source() {

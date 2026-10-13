@@ -142,17 +142,6 @@ where
     {
         return *response;
     }
-    let source = match crate::client_ip::from_extensions(&parts.extensions) {
-        Some(value) => value.to_string(),
-        None => {
-            return error(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "platform.peer_missing",
-                false,
-                request_id.as_ref(),
-            );
-        }
-    };
     if let Err(response) = validate_login_cookie(
         &parts.headers,
         &state.product_id,
@@ -190,7 +179,6 @@ where
         Err(response) => return *response,
     };
     let context = crate::admin_core::LoginContext {
-        source,
         request_id: request_id.as_ref().map(ToString::to_string),
         now_micros: now,
     };
@@ -525,22 +513,6 @@ where
             false,
             request_id,
         ),
-        ServiceError::LoginRateLimited => {
-            let mut response = error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "auth.rate_limited",
-                true,
-                request_id,
-            );
-            // Conservatively wait one complete platform window; never advise immediate retries.
-            let seconds = crate::admin_core::LOGIN_WINDOW_MICROS.div_ceil(1_000_000);
-            response.headers_mut().insert(
-                header::RETRY_AFTER,
-                HeaderValue::from_str(&seconds.to_string())
-                    .expect("policy duration is a valid header"),
-            );
-            response
-        }
         ServiceError::AuthenticationBusy | ServiceError::AuthenticationWorkerFailed => error(
             StatusCode::SERVICE_UNAVAILABLE,
             "auth.capacity_unavailable",

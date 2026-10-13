@@ -17,7 +17,7 @@ from .release import (
 )
 
 
-CLI_VERSION = "1.0.11"
+CLI_VERSION = "1.0.12"
 
 
 def _identity(arguments: argparse.Namespace) -> BuildIdentity:

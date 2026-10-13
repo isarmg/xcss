@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | FND-001 | 构建期共享层，不运行中央 xcss service | 根 README、唯一 Cargo/npm 清单、无资源的状态合同 | 产品制品断网运行；xcss 不独立监听或运行 daemon |
 | FND-002 | 1 个 Rust crate 与 1 个 npm 软件包的内部模块共同发布 | 根 Cargo/npm 清单、`src/` 与 `web/` 内部模块 | 一个 crate、一个 tgz；模块选择不移除根 Rust 依赖；Web 外部 peer 按实际需求安装 |
-| FND-003 | 全组件当前清单版本 `1.0.12` | Cargo 软件包 version、npm 软件包 version、`xcss_policy.py` | repository 规则精确一致性检查 |
+| FND-003 | 全组件当前清单版本 `1.0.13` | Cargo 软件包 version、npm 软件包 version、`xcss_policy.py` | repository 规则精确一致性检查 |
 | FND-004 | 只提供唯一当前 API/合同/算法 | crate/package public API、严格的运行时校验、文档 | 不存在别名、dual reader/write、已弃用的导出入口 |
 | FND-006 | 公共认证、存储、运行时机制编入各产品，不拥有中央在线实例或产品业务数据 | `admin_core`、`admin_sqlite`、`server_runtime`、`platform_db` 等内部模块 | 产品拥有自己的管理员状态、业务 DB、文件树与进程；xcss 状态合同 resources 为空 |
 | FND-007 | 生产不依赖 GitHub/npm/xcss 在线可用 | 消费者 pin、编译/打包模型 | 构建后断网启动与核心功能验证 |
@@ -346,7 +346,7 @@
 | FND-342 | tool tar固定mtime=0/uid/gid/name/mode/order | asset builder | 双构建SHA相同 |
 | FND-343 | 发行 output必须安全、空、非root目录 | `prepare_output` | broad/nonempty/link目录负例 |
 | FND-344 | 发行要求工作树无tracked/untracked变化 | `verify_source` | porcelain必须空 |
-| FND-345 | 标签必须精确`v1.0.12`且唯一指向HEAD | `verify_source` | wrong/missing/multiple 标签负例 |
+| FND-345 | 标签必须精确`v1.0.13`且唯一指向HEAD | `verify_source` | wrong/missing/multiple 标签负例 |
 | FND-346 | 状态合同先生成再hash绑定发行身份 | asset builder顺序 | hash与Schema验证 |
 | FND-347 | build inventory记录工具链与两个lock hash | `inventory` | JSON内容与hash测试 |
 | FND-348 | inventory枚举1个Rust和1个npm组件 | cargo 元数据 + 软件包 discover | component集合检查 |
@@ -393,7 +393,7 @@
 | FND-380 | 产品业务账户、设备身份和专有账号生命周期 | 各产品业务 DB/CLI/API | 单管理员初始化、自助更新、当前身份与密码策略由 admin_core/admin_sqlite 固定，产品验证业务身份 |
 | FND-381 | 业务会话或产品专有授权状态 | 各产品数据面 | 管理员 TTL、并发上限与撤销由公共模块固定；产品测试数据面授权 |
 | FND-382 | 产品代理、域名、监听和 TLS 部署策略 | 各产品部署层与 HTTP 挂载 | 管理 Cookie 名、Path/Secure/HttpOnly/SameSite 由公共适配器固定；产品验证真实 Set-Cookie/TLS |
-| FND-383 | 产品业务请求的限流、容量和审计规则 | 各产品业务接口 | 公共管理员登录限流、未知用户成本与安全审计不删除；产品攻击和容量测试保留 |
+| FND-383 | 产品业务请求的限流、容量和审计规则 | 各产品业务接口 | 不建立地址、账号或会话失败频率桶；密码计算、正文读取、全局并发和等待容量仍有边界，安全审计保留 |
 | FND-384 | 设备、客户端、API key、媒体令牌等数据面身份 | 各产品协议 | admin 通信格式与数据面合同分离测试 |
 | FND-385 | 产品业务路由、DTO、middleware 和额外响应约束 | 各服务端业务 HTTP 层 | admin_axum/admin_hyper/server_cli 提供公共管理面、body/rejection/request-ID；产品真实路由测试 |
 | FND-386 | 产品配置字段、环境映射与外部 Secret 来源选择 | 各产品 config/env 与 Secret backend | config/secret 模块提供安全原语；产品启动字段、权限与外部前提负例 |

@@ -5,7 +5,7 @@
 | 层 | 内部模块或公开子路径 | 一句话用途 |
 |---|---|---|
 | Rust 安全 | `xcss::admin_auth` | 管理员名、Argon2id、令牌、Cookie、同源和 CSRF 原语 |
-| Rust 认证 | `xcss::admin_core` | 账户/会话生命周期、登录限流、认证与安全审计机制 |
+| Rust 认证 | `xcss::admin_core` | 账户/会话生命周期、认证、密码计算容量与安全审计机制 |
 | Rust HTTP | `xcss::admin_axum` | Axum 管理员 HTTP 挂载、请求校验与响应适配 |
 | Rust HTTP | `xcss::admin_hyper` | Hyper 管理员 HTTP 挂载与同等安全适配 |
 | Rust 认证存储 | `xcss::admin_sqlite` | 持久管理员和会话的 SQLite 存储与事务 |

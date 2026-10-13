@@ -40,8 +40,8 @@ profile = "server-filesystem"
 http_adapter = "axum"
 web_profile = "web-embedded-native"
 capabilities = [
-  "admin-static",
-  "memory-sessions",
+  "platform-sqlite",
+  "admin-persistent",
   "server-runtime",
   "server-health",
   "filesystem-root",

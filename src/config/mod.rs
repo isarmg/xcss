@@ -2,7 +2,9 @@
 //! definitions own fields, defaults and business validation; this crate owns
 //! strict parsing, precedence, provenance and safe contract diagnostics.
 
+mod managed;
 mod strict;
+pub use managed::read_managed_file;
 #[cfg(test)]
 mod tests;
 
@@ -161,7 +163,7 @@ impl ConfigError {
             ),
             Reason::UnsafeFile => (
                 "unsafe_config_file",
-                "The configuration path must be a private owned regular file.",
+                "The configuration path does not satisfy its ownership and permission contract.",
             ),
             Reason::ReadFailed => (
                 "config_read_failed",

@@ -362,6 +362,265 @@ fn private_configuration_read_is_bounded_readonly_and_rejects_unsafe_files() {
 }
 
 #[test]
+fn managed_configuration_rejects_unsafe_modes_links_groups_and_unbound_owner() {
+    use std::{
+        fs,
+        os::unix::fs::{PermissionsExt, chown, symlink},
+    };
+    let directory = tempfile::tempdir().unwrap();
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let path = directory.path().join("config.json");
+    fs::write(&path, b"{\"workers\":4}").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    assert_eq!(read_managed_file(&path, true).unwrap(), b"{\"workers\":4}");
+    if rustix::process::geteuid().as_raw() != 0 {
+        assert_eq!(
+            read_managed_file(&path, false).unwrap_err().reason,
+            Reason::UnsafeFile
+        );
+    } else {
+        assert_eq!(read_managed_file(&path, false).unwrap(), b"{\"workers\":4}");
+    }
+    for mode in [0o644, 0o660, 0o664, 0o4640] {
+        fs::set_permissions(&path, fs::Permissions::from_mode(mode)).unwrap();
+        assert_eq!(
+            read_managed_file(&path, true).unwrap_err().reason,
+            Reason::UnsafeFile
+        );
+    }
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    fs::hard_link(&path, directory.path().join("hard-link")).unwrap();
+    assert_eq!(
+        read_managed_file(&path, true).unwrap_err().reason,
+        Reason::UnsafeFile
+    );
+    fs::remove_file(directory.path().join("hard-link")).unwrap();
+    symlink(&path, directory.path().join("link")).unwrap();
+    assert_eq!(
+        read_managed_file(&directory.path().join("link"), true)
+            .unwrap_err()
+            .reason,
+        Reason::UnsafeFile
+    );
+    let nested = directory.path().join("nested");
+    fs::create_dir(&nested).unwrap();
+    fs::set_permissions(&nested, fs::Permissions::from_mode(0o700)).unwrap();
+    fs::copy(&path, nested.join("config.json")).unwrap();
+    symlink(&nested, directory.path().join("directory-link")).unwrap();
+    assert_eq!(
+        read_managed_file(&directory.path().join("directory-link/config.json"), true)
+            .unwrap_err()
+            .reason,
+        Reason::UnsafeFile
+    );
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o757)).unwrap();
+    assert_eq!(
+        read_managed_file(&nested.join("config.json"), true)
+            .unwrap_err()
+            .reason,
+        Reason::UnsafeFile
+    );
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let fifo = directory.path().join("fifo");
+    rustix::fs::mkfifoat(
+        rustix::fs::CWD,
+        &fifo,
+        rustix::fs::Mode::from_raw_mode(0o600),
+    )
+    .unwrap();
+    assert_eq!(
+        read_managed_file(&fifo, true).unwrap_err().reason,
+        Reason::UnsafeFile
+    );
+    fs::write(&path, vec![0; MAX_CONFIG_BYTES + 1]).unwrap();
+    assert_eq!(
+        read_managed_file(&path, true).unwrap_err().reason,
+        Reason::LimitExceeded
+    );
+    assert_eq!(
+        read_managed_file(&directory.path().join("missing"), true)
+            .unwrap_err()
+            .reason,
+        Reason::MissingFile
+    );
+    if rustix::process::geteuid().as_raw() == 0 {
+        fs::write(&path, b"{} ").unwrap();
+        chown(&path, Some(0), Some(33)).unwrap();
+        assert_eq!(
+            read_managed_file(&path, false).unwrap_err().reason,
+            Reason::UnsafeFile
+        );
+        chown(&path, Some(33), Some(0)).unwrap();
+        assert_eq!(
+            read_managed_file(&path, false).unwrap_err().reason,
+            Reason::UnsafeFile
+        );
+    }
+}
+
+#[test]
+fn managed_configuration_is_readable_but_not_writable_by_the_real_service_uid() {
+    use std::{
+        fs,
+        os::unix::{
+            fs::{PermissionsExt, chown},
+            process::CommandExt,
+        },
+        process::Command,
+    };
+    if rustix::process::geteuid().as_raw() != 0 {
+        // Creating root-controlled installation fixtures requires an actual
+        // administrator. Non-root CI still exercises all portable negatives.
+        return;
+    }
+    let root = tempfile::tempdir().unwrap();
+    fs::set_permissions(root.path(), fs::Permissions::from_mode(0o750)).unwrap();
+    chown(root.path(), Some(0), Some(33)).unwrap();
+    let config_dir = root.path().join("config");
+    fs::create_dir(&config_dir).unwrap();
+    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o750)).unwrap();
+    chown(&config_dir, Some(0), Some(33)).unwrap();
+    let path = config_dir.join("config.json");
+    fs::write(&path, b"{\"workers\":4}").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+    chown(&path, Some(0), Some(33)).unwrap();
+    let run = |uid, kind: &str| {
+        let result = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "config::tests::managed_configuration_uid_helper",
+                "--ignored",
+            ])
+            .env("XCSS_CONFIG_TEST_ROOT", root.path())
+            .env("XCSS_CONFIG_TEST_KIND", kind)
+            .uid(uid)
+            .gid(uid)
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "helper failed: {} {}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let output = String::from_utf8_lossy(&result.stdout);
+        assert!(
+            output.contains("running 1 test") && output.contains("1 passed"),
+            "UID helper must run exactly once: {output}"
+        );
+    };
+    run(33, "managed");
+    run(34, "unrelated");
+    assert_eq!(fs::read(&path).unwrap(), b"{\"workers\":4}");
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 1);
+    assert_eq!(fs::read_dir(&config_dir).unwrap().count(), 1);
+    // Development ownership is explicit and cannot be used by a release build.
+    chown(&path, Some(33), Some(33)).unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    chown(&config_dir, Some(33), Some(33)).unwrap();
+    fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700)).unwrap();
+    run(33, "development");
+}
+
+#[test]
+fn managed_configuration_rejects_additional_access_and_default_acl() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+    let directory = tempfile::tempdir().unwrap();
+    fs::set_permissions(directory.path(), fs::Permissions::from_mode(0o700)).unwrap();
+    let path = directory.path().join("config.json");
+    fs::write(&path, b"{}").unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+    // Linux POSIX ACL xattr v2: owner, named user, owning group, mask, other.
+    // The named user has no effective rights, so even unchanged mode 0600 must
+    // not disguise an additional access policy or inherit it into later files.
+    let mut acl = 2u32.to_le_bytes().to_vec();
+    for (tag, permission, identity) in [
+        (1u16, 6u16, u32::MAX),
+        (2, 4, 34),
+        (4, 0, u32::MAX),
+        (16, 0, u32::MAX),
+        (32, 0, u32::MAX),
+    ] {
+        acl.extend_from_slice(&tag.to_le_bytes());
+        acl.extend_from_slice(&permission.to_le_bytes());
+        acl.extend_from_slice(&identity.to_le_bytes());
+    }
+    match rustix::fs::setxattr(
+        &path,
+        "system.posix_acl_access",
+        &acl,
+        rustix::fs::XattrFlags::empty(),
+    ) {
+        Err(rustix::io::Errno::NOTSUP) => return,
+        result => result.unwrap(),
+    }
+    assert_eq!(
+        read_managed_file(&path, true).unwrap_err().reason,
+        Reason::UnsafeFile
+    );
+    rustix::fs::removexattr(&path, "system.posix_acl_access").unwrap();
+    assert_eq!(read_managed_file(&path, true).unwrap(), b"{}");
+    rustix::fs::setxattr(
+        directory.path(),
+        "system.posix_acl_default",
+        &acl,
+        rustix::fs::XattrFlags::empty(),
+    )
+    .unwrap();
+    assert_eq!(
+        read_managed_file(&path, true).unwrap_err().reason,
+        Reason::UnsafeFile
+    );
+}
+
+#[test]
+#[ignore = "executed in an isolated UID child by the managed configuration test"]
+fn managed_configuration_uid_helper() {
+    use std::{fs, os::unix::fs::MetadataExt, path::PathBuf};
+    let root = PathBuf::from(std::env::var_os("XCSS_CONFIG_TEST_ROOT").expect("isolated fixture"));
+    let kind = std::env::var("XCSS_CONFIG_TEST_KIND").unwrap();
+    let config_dir = root.join("config");
+    let path = config_dir.join("config.json");
+    if kind == "unrelated" {
+        assert_eq!(rustix::process::geteuid().as_raw(), 34);
+        assert!(read_managed_file(&path, false).is_err());
+        return;
+    }
+    assert_eq!(rustix::process::geteuid().as_raw(), 33);
+    if kind == "development" {
+        assert_eq!(
+            read_managed_file(&path, false).unwrap_err().reason,
+            Reason::UnsafeFile
+        );
+        assert_eq!(read_managed_file(&path, true).unwrap(), b"{\"workers\":4}");
+        return;
+    }
+    assert_eq!(fs::metadata(&path).unwrap().uid(), 0);
+    assert_eq!(fs::metadata(&path).unwrap().gid(), 33);
+    assert_eq!(read_managed_file(&path, false).unwrap(), b"{\"workers\":4}");
+    assert!(read_private_file(&path).is_err());
+    let denied = |result: std::io::Result<()>| {
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+    };
+    denied(fs::OpenOptions::new().write(true).open(&path).map(|_| ()));
+    denied(
+        fs::OpenOptions::new()
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .map(|_| ()),
+    );
+    denied(fs::write(config_dir.join("new-config"), b"{}"));
+    denied(fs::write(root.join("new-root-file"), b"{}"));
+    denied(fs::remove_file(&path));
+    denied(fs::rename(&path, config_dir.join("renamed-config")));
+    denied(fs::rename(&config_dir, root.join("renamed-directory")));
+}
+
+#[test]
 fn deny_unknown_fields_reports_each_key_once() {
     #[derive(Debug, Deserialize)]
     #[serde(deny_unknown_fields)]

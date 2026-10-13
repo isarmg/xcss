@@ -120,6 +120,7 @@ pub fn transition(operation: &mut Operation, event: Transition) -> Result<(), Er
         }
         (OperationState::Running, Transition::Succeed) => {
             operation.state = OperationState::Succeeded;
+            operation.error_code = None;
             clear_lease(operation);
         }
         (
@@ -1192,6 +1193,45 @@ mod tests {
         }
     }
 
+    #[test]
+    fn successful_retry_clears_the_previous_transition_error() {
+        let mut operation = pending();
+        transition(
+            &mut operation,
+            Transition::Claim {
+                owner: "worker".into(),
+                lease_expiry_micros: 10,
+            },
+        )
+        .unwrap();
+        transition(
+            &mut operation,
+            Transition::Fail {
+                code: "media_request_failed".into(),
+                retryable: true,
+                retry_not_before_micros: 4,
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            operation.error_code.as_deref(),
+            Some("media_request_failed")
+        );
+        transition(
+            &mut operation,
+            Transition::Claim {
+                owner: "worker".into(),
+                lease_expiry_micros: 12,
+            },
+        )
+        .unwrap();
+        transition(&mut operation, Transition::Succeed).unwrap();
+        assert_eq!(operation.state, OperationState::Succeeded);
+        assert_eq!(operation.error_code, None);
+        assert_eq!(operation.lease_owner, None);
+        assert_eq!(operation.lease_expiry_micros, None);
+    }
+
     async fn store() -> SqliteOperationStore {
         let pool = sqlx::sqlite::SqlitePoolOptions::new()
             .max_connections(1)
@@ -1218,6 +1258,60 @@ mod tests {
             not_before_micros: 1,
             created_at_micros: 1,
         }
+    }
+
+    #[tokio::test]
+    async fn successful_retry_clears_the_previous_attempt_error() {
+        let store = store().await;
+        store
+            .enqueue(new_operation("a", "camera", 1))
+            .await
+            .unwrap();
+        let first = store
+            .claim_next("media", "worker", 2, 10)
+            .await
+            .unwrap()
+            .unwrap();
+        let retry = store
+            .apply_transition_owned(
+                &first.operation,
+                Transition::Fail {
+                    code: "media_request_failed".into(),
+                    retryable: true,
+                    retry_not_before_micros: 4,
+                },
+                Some(br#"{"error":"media request failed"}"#),
+                3,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            retry.operation.error_code.as_deref(),
+            Some("media_request_failed")
+        );
+        let second = store
+            .claim_next("media", "worker", 4, 12)
+            .await
+            .unwrap()
+            .unwrap();
+        let succeeded = store
+            .apply_transition_owned(
+                &second.operation,
+                Transition::Succeed,
+                Some(br#"{"converged":true}"#),
+                5,
+            )
+            .await
+            .unwrap();
+        assert_eq!(succeeded.operation.state, OperationState::Succeeded);
+        assert_eq!(succeeded.operation.attempt, 2);
+        assert_eq!(succeeded.operation.error_code, None);
+        assert_eq!(
+            succeeded.result_payload.as_deref(),
+            Some(br#"{"converged":true}"#.as_slice())
+        );
+        let persisted = store.get("a").await.unwrap().unwrap();
+        assert_eq!(persisted, succeeded);
     }
 
     #[tokio::test]

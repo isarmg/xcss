@@ -146,10 +146,13 @@ mod tests {
             .await
             .unwrap();
         let service = AdministratorService::new(SqliteAdministratorStore::new(pool));
-        service
-            .bootstrap_administrator("admin", "correct horse battery", now())
-            .await
-            .unwrap();
+        crate::testkit::initialize_administrator_fixture(
+            service.store().pool(),
+            "admin",
+            "correct horse battery",
+            now(),
+        )
+        .await;
         let login = service
             .login(
                 "admin",
@@ -266,12 +269,13 @@ mod tests {
         let before = logical_snapshot(service.store().pool()).await;
         assert!(service.store().validate_all_administrators().await.is_err());
         assert_eq!(before, logical_snapshot(service.store().pool()).await);
-        assert!(
-            service
-                .bootstrap_administrator("admin", "correct horse battery", now())
-                .await
-                .unwrap()
-        );
+        crate::testkit::initialize_administrator_fixture(
+            service.store().pool(),
+            "admin",
+            "correct horse battery",
+            now(),
+        )
+        .await;
         service.store().validate_all_administrators().await.unwrap();
     }
 

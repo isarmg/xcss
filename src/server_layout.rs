@@ -1,35 +1,18 @@
-//! Product-neutral reports shared by signed offline maintenance tools.
-//!
-//! Products own configuration, schema and migration rules. Their runtimes do
-//! not depend on, detect or invoke an installation or upgrade tool.
-use crate::contracts::SchemaIdentity;
-use serde::{Deserialize, Serialize};
-use std::{
-    net::SocketAddr,
-    path::{Component, Path, PathBuf},
-};
+//! Explicit product-neutral runtime directory layout.
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ConfigReport {
-    pub product: String,
-    pub root: PathBuf,
-    pub data_dir: PathBuf,
-    pub state_paths: Vec<PathBuf>,
-    pub schema_identity: SchemaIdentity,
-    pub bind: SocketAddr,
-    pub writable_paths: Vec<PathBuf>,
-    /// Existing business directories whose permissions and ownership are
-    /// preserved; the helper checks access under the actual service identity.
-    pub shared_paths: Vec<PathBuf>,
-}
+use std::path::{Component, Path, PathBuf};
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct CheckReport {
-    #[serde(flatten)]
-    pub config: ConfigReport,
-    pub initialized: bool,
-}
+/// Names reserved for installed executables, definitions and private runtime
+/// state. Product business data must not overlap these root namespaces.
+pub const ROOT_RESERVED_DIRECTORIES: [&str; 7] = [
+    "bin",
+    "libexec",
+    "share",
+    "config",
+    "logs",
+    "run",
+    "maintenance",
+];
 
 /// One explicit installation root; never infer it from the process directory.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -70,8 +53,5 @@ impl Layout {
     }
     pub fn run(&self) -> PathBuf {
         self.root.join("run")
-    }
-    pub fn maintenance(&self) -> PathBuf {
-        self.root.join("maintenance")
     }
 }

@@ -1,22 +1,32 @@
 //! Framework- and storage-independent administrator control-plane contract.
 
+mod login_attempts;
 mod management;
+pub use login_attempts::{AuthenticationState, AuthenticationStateError};
 pub use management::{AdministratorManagementContext, AdministratorMutation, ManagementError};
 
 use crate::admin_auth::{
     AdministratorOriginMode, require_canonical_administrator_username,
     require_current_password_hash,
 };
-use std::{fmt, sync::Arc, time::Duration};
+use std::{
+    fmt,
+    sync::{Arc, OnceLock},
+    time::Duration,
+};
 use thiserror::Error;
 use tokio::sync::Semaphore;
 
-pub const POLICY_REVISION: u32 = 1;
+pub const POLICY_REVISION: u32 = 2;
 pub const SESSION_IDLE_MICROS: u64 = 30 * 60 * 1_000_000;
 pub const SESSION_ABSOLUTE_MICROS: u64 = 12 * 60 * 60 * 1_000_000;
 pub const SESSIONS_PER_ADMINISTRATOR: usize = 32;
 pub const SESSIONS_GLOBAL: usize = 1_024;
 pub const ARGON2_CONCURRENCY: usize = 2;
+pub const LOGIN_ATTEMPTS_MAX: u32 = 60;
+pub const LOGIN_ATTEMPTS_WINDOW: Duration = Duration::from_secs(60);
+pub const LOGIN_ATTEMPTS_SCOPES_MAX: usize = 256;
+pub const LOGIN_ATTEMPTS_ERROR_CODE: &str = "auth.login_attempts_exceeded";
 pub const ARGON2_ACQUIRE_TIMEOUT_MICROS: u64 = 2 * 1_000_000;
 pub const SESSION_LAST_SEEN_WRITE_INTERVAL_MICROS: u64 = 60 * 1_000_000;
 pub const DIGEST_BYTES: usize = 32;
@@ -24,12 +34,13 @@ pub const IDENTIFIER_MAX_BYTES: usize = 64;
 pub const ADMIN_BODY_MAX_BYTES: usize = 16 * 1024;
 pub const ADMIN_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 pub const ADMIN_BODY_READERS_GLOBAL: usize = 32;
-pub const STATIC_ADMINISTRATORS_MAX: usize = 1;
+pub const ADMINISTRATORS_REQUIRED: usize = 1;
+pub const AUDIT_DETAILS_MAX_BYTES: usize = 16 * 1024;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct AdministratorPolicyV1;
+pub struct AdministratorPolicy;
 
-impl AdministratorPolicyV1 {
+impl AdministratorPolicy {
     pub const fn revision(self) -> u32 {
         POLICY_REVISION
     }
@@ -47,6 +58,15 @@ impl AdministratorPolicyV1 {
     }
     pub const fn argon2_concurrency(self) -> usize {
         ARGON2_CONCURRENCY
+    }
+    pub const fn login_attempts_max(self) -> u32 {
+        LOGIN_ATTEMPTS_MAX
+    }
+    pub const fn login_attempts_window(self) -> Duration {
+        LOGIN_ATTEMPTS_WINDOW
+    }
+    pub const fn login_attempts_scopes_max(self) -> usize {
+        LOGIN_ATTEMPTS_SCOPES_MAX
     }
     pub const fn argon2_acquire_timeout_micros(self) -> u64 {
         ARGON2_ACQUIRE_TIMEOUT_MICROS
@@ -253,13 +273,16 @@ pub struct SecurityAuditEvent {
 impl SecurityAuditEvent {
     pub fn validate(&self) -> Result<(), Error> {
         require_persistable_time(self.occurred_at_micros)?;
+        if self.detail_json.len() > AUDIT_DETAILS_MAX_BYTES {
+            return Err(Error::InvalidAuditEvent);
+        }
         let detail: serde_json::Value =
             serde_json::from_str(&self.detail_json).map_err(|_| Error::InvalidAuditEvent)?;
         if !detail.is_object()
             || self
                 .request_id
                 .as_ref()
-                .is_some_and(|value| value.is_empty() || value.len() > 128 || !value.is_ascii())
+                .is_some_and(|value| crate::contracts::RequestId::new(value.clone()).is_err())
         {
             return Err(Error::InvalidAuditEvent);
         }
@@ -283,6 +306,11 @@ pub struct SessionAndAdministrator {
 #[async_trait::async_trait]
 pub trait AdministratorStore: Send + Sync {
     type StoreError: std::error::Error + Send + Sync + 'static;
+    /// Return the installation's shared admission state, including when a
+    /// service or pool is recreated. Never derive scope from request input.
+    async fn authentication_state(
+        &self,
+    ) -> Result<Arc<AuthenticationState>, AuthenticationStateError>;
     fn supports_account_updates(&self) -> bool;
     async fn manage_administrator(
         &self,
@@ -382,104 +410,17 @@ where
     pub fn new(store: Store) -> Self {
         Self {
             store,
-            argon2_slots: Arc::new(Semaphore::new(ARGON2_CONCURRENCY)),
+            argon2_slots: {
+                static SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+                SLOTS
+                    .get_or_init(|| Arc::new(Semaphore::new(ARGON2_CONCURRENCY)))
+                    .clone()
+            },
         }
     }
 
     pub fn store(&self) -> &Store {
         &self.store
-    }
-
-    /// Create the first administrator when the persistent store is empty.
-    /// Returns `false` without mutating the store once any administrator exists.
-    pub async fn bootstrap_administrator(
-        &self,
-        username_candidate: &str,
-        password: &str,
-        now_micros: u64,
-    ) -> Result<bool, ServiceError<Store::StoreError>> {
-        require_persistable_time(now_micros)?;
-        let username = crate::admin_auth::normalize_administrator_username(username_candidate)?;
-        if self
-            .store
-            .administrator_count()
-            .await
-            .map_err(ServiceError::Store)?
-            != 0
-        {
-            return Ok(false);
-        }
-        self.create_administrator_record(username, password, now_micros)
-            .await?;
-        Ok(true)
-    }
-
-    /// Change an administrator password and revoke all existing sessions in
-    /// the same store transaction.
-    pub async fn change_administrator_password(
-        &self,
-        username_candidate: &str,
-        password: &str,
-        now_micros: u64,
-    ) -> Result<(), ServiceError<Store::StoreError>> {
-        require_persistable_time(now_micros)?;
-        let username = crate::admin_auth::normalize_administrator_username(username_candidate)?;
-        let administrator = self
-            .store
-            .administrator_by_username(&username)
-            .await
-            .map_err(ServiceError::Store)?
-            .ok_or(ServiceError::AdministratorNotFound)?;
-        let password_hash = self.hash_password(password).await?;
-        let events = [
-            maintenance_event(
-                SecurityAction::AdministratorPasswordChanged,
-                &administrator,
-                now_micros,
-            )?,
-            maintenance_event(
-                SecurityAction::AdministratorSessionsRevoked,
-                &administrator,
-                now_micros,
-            )?,
-        ];
-        self.store
-            .change_password(
-                &administrator.administrator_id,
-                &password_hash,
-                now_micros,
-                events,
-            )
-            .await
-            .map_err(ServiceError::Store)
-    }
-
-    async fn create_administrator_record(
-        &self,
-        username: String,
-        password: &str,
-        now_micros: u64,
-    ) -> Result<(), ServiceError<Store::StoreError>> {
-        let password_hash = self.hash_password(password).await?;
-        let administrator = AdministratorRecord {
-            administrator_id: Identifier::new(crate::admin_auth::random_token()?)?,
-            username,
-            password_hash,
-            active: true,
-            session_version: 1,
-            created_at_micros: now_micros,
-            updated_at_micros: now_micros,
-            last_login_at_micros: None,
-        };
-        let event = maintenance_event(
-            SecurityAction::AdministratorCreated,
-            &administrator,
-            now_micros,
-        )?;
-        self.store
-            .create_administrator(administrator, event)
-            .await
-            .map_err(ServiceError::Store)
     }
 
     async fn hash_password(
@@ -512,6 +453,18 @@ where
         context: &LoginContext,
     ) -> Result<AuthenticatedSession, ServiceError<Store::StoreError>> {
         context.validate()?;
+        self.store
+            .authentication_state()
+            .await
+            .and_then(|state| state.admit_login_attempt())
+            .map_err(|error| match error {
+                AuthenticationStateError::Unavailable => ServiceError::AuthenticationBusy,
+                AuthenticationStateError::LoginAttemptsExceeded {
+                    retry_after_seconds,
+                } => ServiceError::LoginAttemptsExceeded {
+                    retry_after_seconds,
+                },
+            })?;
         let normalized =
             crate::admin_auth::normalize_administrator_username(username_candidate).ok();
         let administrator = match normalized.as_deref() {
@@ -780,32 +733,15 @@ fn security_event(
     })
 }
 
-fn maintenance_event(
-    action: SecurityAction,
-    administrator: &AdministratorRecord,
-    now_micros: u64,
-) -> Result<SecurityAuditEvent, Error> {
-    Ok(SecurityAuditEvent {
-        event_id: Identifier::new(crate::admin_auth::random_token()?)?,
-        action,
-        outcome: AuditOutcome::Success,
-        actor_administrator_id: None,
-        subject_digest: Some(crate::admin_auth::token_hash(&administrator.username)),
-        request_id: None,
-        detail_json: "{}".into(),
-        occurred_at_micros: now_micros,
-    })
-}
-
 #[derive(Debug, Error)]
 pub enum ServiceError<StoreError>
 where
     StoreError: std::error::Error + Send + Sync + 'static,
 {
-    #[error("administrator was not found")]
-    AdministratorNotFound,
     #[error("administrator credentials are invalid")]
     InvalidCredentials,
+    #[error("administrator login attempts exceeded; retry after {retry_after_seconds} seconds")]
+    LoginAttemptsExceeded { retry_after_seconds: u64 },
     #[error("password verification capacity is temporarily exhausted")]
     AuthenticationBusy,
     #[error("password verification worker exited unexpectedly")]
@@ -943,7 +879,7 @@ mod tests {
 
     #[test]
     fn policy_and_cookie_contract_are_fixed() {
-        let policy = AdministratorPolicyV1;
+        let policy = AdministratorPolicy;
         assert_eq!(policy.session_idle_micros(), 1_800_000_000);
         assert_eq!(policy.sessions_global(), 1_024);
         let token = "A".repeat(43);
@@ -966,5 +902,50 @@ mod tests {
             .unwrap()
             .contains("Secure")
         );
+    }
+
+    #[tokio::test]
+    async fn independent_installations_share_cpu_budget_but_not_attempt_counts() {
+        let first = AdministratorService::new(
+            crate::testkit::administrator_fixture("admin", "correct horse battery").await,
+        );
+        let second = AdministratorService::new(
+            crate::testkit::administrator_fixture("admin", "correct horse battery").await,
+        );
+        assert!(Arc::ptr_eq(&first.argon2_slots, &second.argon2_slots));
+        let first_state = first.store().authentication_state().await.unwrap();
+        let second_state = second.store().authentication_state().await.unwrap();
+        assert!(!Arc::ptr_eq(&first_state, &second_state));
+        for _ in 0..LOGIN_ATTEMPTS_MAX {
+            first_state.admit_login_attempt().unwrap();
+        }
+        assert!(matches!(
+            first_state.admit_login_attempt(),
+            Err(AuthenticationStateError::LoginAttemptsExceeded { .. })
+        ));
+        assert_eq!(second_state.admit_login_attempt(), Ok(()));
+    }
+
+    #[test]
+    fn audit_input_is_bounded_before_json_parsing_and_uses_canonical_request_ids() {
+        let mut event = SecurityAuditEvent {
+            event_id: Identifier::new("event-1").unwrap(),
+            action: SecurityAction::LoginSucceeded,
+            outcome: AuditOutcome::Success,
+            actor_administrator_id: None,
+            subject_digest: None,
+            request_id: Some("valid-request".into()),
+            detail_json: "{}".into(),
+            occurred_at_micros: 1,
+        };
+        assert!(event.validate().is_ok());
+        event.detail_json = format!(
+            "{{\"padding\":\"{}\"}}",
+            "x".repeat(AUDIT_DETAILS_MAX_BYTES)
+        );
+        assert!(event.validate().is_err());
+        event.detail_json = "{}".into();
+        event.request_id = Some("invalid\nrequest".into());
+        assert!(event.validate().is_err());
     }
 }

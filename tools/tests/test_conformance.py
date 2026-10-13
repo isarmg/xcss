@@ -181,18 +181,33 @@ class ConformanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ConformanceError, "exact xcss Git source"):
                 verify_source(product, ROOT)
 
-    def test_removed_independent_packages_cannot_silently_escape_source_checks(self) -> None:
+    def test_actual_source_and_identity_are_checked_without_prefix_inference(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             product = Path(directory)
             self.embedded_fixture(product)
             cargo = product / "Cargo.toml"
             original = cargo.read_text()
-            cargo.write_text(original.replace('[dependencies]\n', '[dependencies]\nold={package="xcss-error",version="1.0"}\n'))
-            with self.assertRaisesRegex(ConformanceError, "independent xcss-error was removed"):
+            cargo.write_text(original.replace('[dependencies]\n', '[dependencies]\ncodec={package="xcss-independent-codec",version="1.0"}\n'))
+            verify_source(product, ROOT)
+            cargo.write_text(original.replace('[dependencies]\n', '[dependencies]\nextra={package="unrelated-name",git="https://github.com/isarmg/xcss.git",rev="0123456789abcdef0123456789abcdef01234567",version="=1.0.0"}\n'))
+            with self.assertRaisesRegex(ConformanceError, "official xcss source declares an additional"):
                 verify_source(product, ROOT)
             cargo.write_text(original)
-            (product / "package.json").write_text(json.dumps({"dependencies": {"@xcss/admin-ui": "1.0.0"}}))
-            with self.assertRaisesRegex(ConformanceError, "independent @xcss/admin-ui was removed"):
+            lock = product / "Cargo.lock"
+            original_lock = lock.read_text()
+            lock.write_text(original_lock + '\n[[package]]\nname="xcss-independent-codec"\nversion="1.0.0"\nsource="registry+https://github.com/rust-lang/crates.io-index"\n')
+            verify_source(product, ROOT)
+            lock.write_text(original_lock + '\n[[package]]\nname="unrelated-name"\nversion="1.0.0"\nsource="git+https://github.com/isarmg/xcss.git?rev=0123456789abcdef0123456789abcdef01234567#0123456789abcdef0123456789abcdef01234567"\n')
+            with self.assertRaisesRegex(ConformanceError, "official xcss source resolves an additional"):
+                verify_source(product, ROOT)
+            lock.write_text(original_lock.replace('?rev=', '?branch='))
+            with self.assertRaisesRegex(ConformanceError, "expected one locked"):
+                verify_source(product, ROOT)
+            lock.write_text(original_lock)
+            (product / "package.json").write_text(json.dumps({"dependencies": {"@xcss/independent-codec": "1.0.0"}}))
+            verify_source(product, ROOT)
+            (product / "package.json").write_text(json.dumps({"dependencies": {"unrelated-name": "https://github.com/isarmg/xcss/releases/download/v1.0.0/xcss-web-1.0.0.tgz"}}))
+            with self.assertRaisesRegex(ConformanceError, "incorrect package identity"):
                 verify_source(product, ROOT)
 
     def test_release_check_distinguishes_source_inspection_from_publication_gate(self) -> None:

@@ -101,7 +101,7 @@ jobs:
       - name: Verify server logging without the optional tracing adapter
         run: cargo clippy --locked --no-default-features -- -D warnings
       - name: Test the single server package
-        run: cargo test --locked --all-targets --all-features
+        run: cargo test --locked --all-targets --all-features -- --test-threads=2
       - name: Reject Rust documentation warnings
         run: RUSTDOCFLAGS="-Dwarnings" cargo doc --locked --all-features --no-deps
 

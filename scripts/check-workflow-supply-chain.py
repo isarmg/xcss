@@ -16,7 +16,7 @@ from pathlib import Path, PurePath
 FIXED_RUNNER = "ubuntu-24.04"
 MAX_TIMEOUT_MINUTES = 30
 MAX_WORKFLOW_BYTES = 1024 * 1024
-CLI_VERSION = "1.0.13"
+CLI_VERSION = "1.0.14"
 PINNED_OFFICIAL_ACTIONS = {
     "actions/checkout": "3d3c42e5aac5ba805825da76410c181273ba90b1",
     "actions/setup-node": "820762786026740c76f36085b0efc47a31fe5020",
@@ -204,7 +204,7 @@ def validate_job(source: str, header: Line, segment: list[Line]) -> None:
         required = {
             'if cargo check --locked -p xcss --target "$target" 2>"$log"; then',
             'grep -F "xcss supports only x86_64-unknown-linux-gnu server builds" "$log"',
-            "cargo test --locked --all-targets --all-features",
+            "cargo test --locked --all-targets --all-features -- --test-threads=2",
         }
         if not required <= commands:
             raise fail(source, header, "server job must prove the whole-package Linux AMD64 gate and execute locked native tests")

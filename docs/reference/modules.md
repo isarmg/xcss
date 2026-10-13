@@ -9,7 +9,8 @@
 | Rust HTTP | `xcss::admin_axum` | Axum 管理员 HTTP 挂载、请求校验与响应适配 |
 | Rust HTTP | `xcss::admin_hyper` | Hyper 管理员 HTTP 挂载与同等安全适配 |
 | Rust 认证存储 | `xcss::admin_sqlite` | 持久管理员和会话的 SQLite 存储与事务 |
-| Rust 静态认证 | `xcss::admin_static` | 单个静态管理员、当前账户文件与内存会话 |
+| Rust 构建契约 | `xcss::configuration_contract`、`installation_material::common`、`admin_sqlite::installation_contract` | 同源生成配置 Schema、默认值、语义规则、DDL、凭据与操作材料 |
+| Rust 布局 | `xcss::server_layout` | 显式绝对 ROOT 的运行路径 |
 | Rust 配置 | `xcss::config` | 分层配置、显式环境映射、来源与输入预算 |
 | Rust 协议 | `xcss::contracts` | 管理员、状态、发行、备份和错误的严格通信格式 |
 | Rust 错误 | `xcss::error` | 有界错误码、请求 ID 和结构化错误响应 |
@@ -19,13 +20,13 @@
 | Rust 公共数据库 | `xcss::platform_db` | 管理控制面的公共 SQLite 表与结构 |
 | Rust 数据身份 | `xcss::schema_identity` | SQLite 规范结构指纹与四分量身份算法 |
 | Rust 秘密 | `xcss::secret` | 秘密值的安全类型与处理原语 |
-| Rust 秘密封装 | `xcss::secret_envelope` | 当前秘密封装格式与认证加密 |
+| Rust 秘密封装 | `xcss::secret_envelope` | 当前秘密封装、动态定义运算及构建期格式材料 |
 | Rust HTTP 连接 | `xcss::secure_http` | 服务端出站 HTTP 的安全连接机制 |
 | Rust CLI | `xcss::server_cli` | 机器错误、就绪身份核验和共同 HTTP 解析拒绝 |
 | Rust 生命周期 | `xcss::server_runtime` | 服务启动、关闭、健康和就绪状态 |
 | Rust 平台 | `xcss::server_target` | 目标常量；整个 crate 的 Linux AMD64 GNU 门禁位于根入口 |
 | Rust SQLite | `xcss::sqlite` | SQLx 连接、PRAGMA、诊断、身份适配与只读校验副本 |
-| Rust 状态文件 | `xcss::state_file` | 安全原子写、运行/维护锁与持久维护门 |
+| Rust 状态文件 | `xcss::state_file` | 私有状态文件、稳定身份检查与运行实例锁 |
 | Rust 测试 | `xcss::testkit` | 供测试使用的公共安全夹具与辅助机制 |
 | Rust Web 资源 | `xcss::web_assets` | 确定性内嵌清单、SHA-256、HTTP 与开发目录提供器 |
 | Web 合同 | `@xcss/web/contracts` | TypeScript 类型、运行时校验、JSON Schema 和夹具 |
@@ -38,7 +39,7 @@
 | Web 构建 | `@xcss/web/web-toolchain` | 精确工具链、TypeScript/Vite 配置和服务端构建编排 |
 | 发布 | Python tools/scripts | 软件包归档、状态/发行身份、release-tree 和工作流校验 |
 
-以上 24 个 Rust 模块属于一个 crate，8 个 Web 入口属于一个 npm 包；不是 32 个独立发布的软件包。
+这些 Rust 模块属于一个 crate，Web 入口属于一个 npm 包，各内部模块不独立发布。
 
 ## 目录逐层解释
 

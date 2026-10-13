@@ -4,7 +4,7 @@ xcss 提供一个 Rust crate 与一个管理 Web npm 包。按需要组合内部
 
 | 任务 | 入口 | 参考 |
 |---|---|---|
-| 管理员认证与账户更新 | admin_core、admin_sqlite/admin_static、HTTP 适配器 | [认证](reference/authentication.md)、[账户接口](platform-specifications/administrator-management.md) |
+| 管理员认证与账户更新 | admin_core、admin_sqlite、HTTP 适配器 | [认证](reference/authentication.md)、[账户接口](platform-specifications/administrator-management.md) |
 | 配置、CLI 与日志 | config、server_cli、log | [配置与日志](configuration-cli-logging.md) |
 | 私有文件和状态锁 | fs_safety、state_file | [文件句柄](filesystem-handles.md) |
 | SQLite 与数据身份 | sqlite、schema_identity、platform_db | [合同与结构](reference/contracts-and-schema.md) |

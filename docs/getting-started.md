@@ -42,7 +42,7 @@ web_profile = "web-react-admin"
 capabilities = ["embedded-web", "platform-sqlite", "admin-persistent", "server-runtime", "server-health"]
 ```
 
-静态管理员和文件服务使用不同组合，见[选择配置](configuration.md)。声明 `embedded-web` 后还需按[内嵌 Web](reference/embedded-web.md)提供实际构建输入。
+管理面和文件服务都使用 SQLite 持久管理员，文件服务另声明文件根能力，见[选择配置](configuration.md)。声明 `embedded-web` 后还需按[内嵌 Web](reference/embedded-web.md)提供实际构建输入。
 
 ## 3. 接入管理 Web
 

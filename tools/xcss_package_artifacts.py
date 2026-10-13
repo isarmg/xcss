@@ -15,7 +15,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
 
-CLI_VERSION = "1.0.13"
+CLI_VERSION = "1.0.14"
 MAX_MANIFEST_BYTES = 1024 * 1024
 MAX_TARBALL_BYTES = 64 * 1024 * 1024
 PACKAGE_NAME = re.compile(r"@xcss/[a-z][a-z0-9-]*")
@@ -346,8 +346,6 @@ def _install_smoke(packages: tuple[Package, ...], tarballs: tuple[Path, ...], co
         peers = package.manifest.get("peerDependencies", {})
         development = package.manifest.get("devDependencies", {})
         for name in set(peers) | {name for name in development if name == "typescript" or name.startswith("@types/")}:
-            if name.startswith("@xcss/"):
-                continue
             version = development.get(name, peers.get(name))
             if not isinstance(version, str) or SEMVER.fullmatch(version) is None:
                 raise PackagePolicyError(f"smoke dependency {name} requires an exact manifest version")

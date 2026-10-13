@@ -1,6 +1,9 @@
 //! Transactional persistent implementation of the xcss administrator store.
 
+mod installation_contract;
+mod login_attempts;
 mod management;
+pub use installation_contract::installation_contract;
 
 use crate::admin_core::{
     AdministratorRecord, AdministratorStore, DIGEST_BYTES, Identifier, LoginSuccess,
@@ -8,23 +11,26 @@ use crate::admin_core::{
     SessionAndAdministrator, SessionRecord,
 };
 use sqlx::{Row, Sqlite, SqliteConnection, SqlitePool, Transaction};
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
 pub const ADMIN_PERSISTENT_DDL: &str = include_str!("../../schemas/admin/persistent-v1.sql");
+pub const ADMINISTRATOR_INSERT_SQL: &str = "INSERT INTO _common_administrators(administrator_id, username, password_hash, active, session_version, created_at_micros, updated_at_micros, last_login_at_micros) VALUES(?, ?, ?, ?, ?, ?, ?, ?)";
+pub const ADMINISTRATOR_PASSWORD_RESET_SQL: &str = "UPDATE _common_administrators SET password_hash=?, session_version=session_version+1, updated_at_micros=? WHERE administrator_id=?";
+pub const ADMINISTRATOR_SESSIONS_REVOKE_SQL: &str = "UPDATE _common_admin_sessions SET revoked_at_micros=? WHERE administrator_id=? AND revoked_at_micros IS NULL";
+pub const SECURITY_AUDIT_INSERT_SQL: &str = "INSERT INTO _common_security_audit_events(event_id, action, outcome, actor_administrator_id, subject_digest, request_id, detail_json, occurred_at_micros) VALUES(?, ?, ?, ?, ?, ?, ?, ?)";
+pub const ADMINISTRATORS_QUERY_SQL: &str = "SELECT administrator_id, username, password_hash, active, session_version, created_at_micros, updated_at_micros, last_login_at_micros FROM _common_administrators ORDER BY administrator_id LIMIT 2";
+pub const ADMIN_SESSIONS_QUERY_SQL: &str = "SELECT session_id, administrator_id, token_hash, csrf_hash, administrator_session_version, created_at_micros, last_seen_at_micros, idle_expires_at_micros, absolute_expires_at_micros, revoked_at_micros FROM _common_admin_sessions";
 
 /// Validate the existing account in an already-open read-only snapshot.
 /// Does not open another database, initialize tables or change persistent state.
 pub async fn validate_administrators_on_connection(
     connection: &mut SqliteConnection,
 ) -> Result<(), Error> {
-    let rows = sqlx::query(
-        "SELECT administrator_id, username, password_hash, active, session_version, \
-                created_at_micros, updated_at_micros, last_login_at_micros \
-         FROM _common_administrators ORDER BY administrator_id LIMIT 2",
-    )
-    .fetch_all(connection)
-    .await?;
-    if rows.len() != 1 {
+    let rows = sqlx::query(ADMINISTRATORS_QUERY_SQL)
+        .fetch_all(connection)
+        .await?;
+    if rows.len() != crate::admin_core::ADMINISTRATORS_REQUIRED {
         return Err(Error::ExpectedSingleActiveAdministrator);
     }
     if !administrator_from_row(&rows[0])?.active {
@@ -33,7 +39,7 @@ pub async fn validate_administrators_on_connection(
     Ok(())
 }
 
-/// Insert the sole administrator inside the caller's initialization/migration
+/// Insert the sole administrator inside the caller's account-creation
 /// transaction, preserving a supplied stable identity and password hash.
 pub async fn insert_administrator_on_connection(
     connection: &mut SqliteConnection,
@@ -46,33 +52,32 @@ pub async fn insert_administrator_on_connection(
     if count != 0 {
         return Err(Error::AdministratorAlreadyExists);
     }
-    sqlx::query(
-        "INSERT INTO _common_administrators(\
-            administrator_id, username, password_hash, active, session_version, \
-            created_at_micros, updated_at_micros, last_login_at_micros\
-         ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)",
-    )
-    .bind(administrator.administrator_id.as_str())
-    .bind(&administrator.username)
-    .bind(&administrator.password_hash)
-    .bind(i64::from(administrator.active))
-    .bind(to_i64(administrator.session_version)?)
-    .bind(to_i64(administrator.created_at_micros)?)
-    .bind(to_i64(administrator.updated_at_micros)?)
-    .bind(optional_i64(administrator.last_login_at_micros)?)
-    .execute(connection)
-    .await?;
+    sqlx::query(ADMINISTRATOR_INSERT_SQL)
+        .bind(administrator.administrator_id.as_str())
+        .bind(&administrator.username)
+        .bind(&administrator.password_hash)
+        .bind(i64::from(administrator.active))
+        .bind(to_i64(administrator.session_version)?)
+        .bind(to_i64(administrator.created_at_micros)?)
+        .bind(to_i64(administrator.updated_at_micros)?)
+        .bind(optional_i64(administrator.last_login_at_micros)?)
+        .execute(connection)
+        .await?;
     Ok(())
 }
 
 #[derive(Clone, Debug)]
 pub struct SqliteAdministratorStore {
     pool: SqlitePool,
+    authentication: Arc<OnceLock<Arc<crate::admin_core::AuthenticationState>>>,
 }
 
 impl SqliteAdministratorStore {
     pub fn new(pool: SqlitePool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            authentication: Arc::new(OnceLock::new()),
+        }
     }
     pub fn pool(&self) -> &SqlitePool {
         &self.pool
@@ -103,6 +108,20 @@ impl SqliteAdministratorStore {
 #[async_trait::async_trait]
 impl AdministratorStore for SqliteAdministratorStore {
     type StoreError = Error;
+
+    async fn authentication_state(
+        &self,
+    ) -> Result<
+        Arc<crate::admin_core::AuthenticationState>,
+        crate::admin_core::AuthenticationStateError,
+    > {
+        if let Some(state) = self.authentication.get() {
+            return Ok(state.clone());
+        }
+        let state = login_attempts::state_for_pool(&self.pool).await?;
+        let _ = self.authentication.set(state.clone());
+        Ok(state)
+    }
 
     fn supports_account_updates(&self) -> bool {
         true
@@ -190,14 +209,12 @@ impl AdministratorStore for SqliteAdministratorStore {
         require_action(&events[0], SecurityAction::AdministratorPasswordChanged)?;
         require_action(&events[1], SecurityAction::AdministratorSessionsRevoked)?;
         let mut transaction = self.pool.begin().await?;
-        let changed = sqlx::query(
-            "UPDATE _common_administrators SET password_hash=?, session_version=session_version+1, updated_at_micros=? WHERE administrator_id=?",
-        )
-        .bind(password_hash)
-        .bind(to_i64(now_micros)?)
-        .bind(administrator_id.as_str())
-        .execute(&mut *transaction)
-        .await?;
+        let changed = sqlx::query(ADMINISTRATOR_PASSWORD_RESET_SQL)
+            .bind(password_hash)
+            .bind(to_i64(now_micros)?)
+            .bind(administrator_id.as_str())
+            .execute(&mut *transaction)
+            .await?;
         require_changed(changed.rows_affected(), administrator_id)?;
         revoke_administrator_sessions(&mut transaction, administrator_id, now_micros).await?;
         insert_audit(&mut transaction, &events[0]).await?;
@@ -368,8 +385,11 @@ async fn revoke_administrator_sessions(
     administrator_id: &Identifier,
     now: u64,
 ) -> Result<(), Error> {
-    sqlx::query("UPDATE _common_admin_sessions SET revoked_at_micros=? WHERE administrator_id=? AND revoked_at_micros IS NULL")
-        .bind(to_i64(now)?).bind(administrator_id.as_str()).execute(&mut **transaction).await?;
+    sqlx::query(ADMINISTRATOR_SESSIONS_REVOKE_SQL)
+        .bind(to_i64(now)?)
+        .bind(administrator_id.as_str())
+        .execute(&mut **transaction)
+        .await?;
     Ok(())
 }
 
@@ -378,11 +398,27 @@ async fn insert_audit(
     event: &SecurityAuditEvent,
 ) -> Result<(), Error> {
     event.validate()?;
-    sqlx::query("INSERT INTO _common_security_audit_events(event_id, action, outcome, actor_administrator_id, subject_digest, request_id, detail_json, occurred_at_micros) VALUES(?, ?, ?, ?, ?, ?, ?, ?)")
-        .bind(event.event_id.as_str()).bind(event.action.as_str()).bind(event.outcome.as_str())
-        .bind(event.actor_administrator_id.as_ref().map(Identifier::as_str)).bind(event.subject_digest.as_ref().map(<[u8; DIGEST_BYTES]>::as_slice))
-        .bind(event.request_id.as_deref()).bind(&event.detail_json).bind(to_i64(event.occurred_at_micros)?)
-        .execute(&mut **transaction).await?;
+    sqlx::query(SECURITY_AUDIT_INSERT_SQL)
+        .bind(event.event_id.as_str())
+        .bind(event.action.as_str())
+        .bind(event.outcome.as_str())
+        .bind(
+            event
+                .actor_administrator_id
+                .as_ref()
+                .map(Identifier::as_str),
+        )
+        .bind(
+            event
+                .subject_digest
+                .as_ref()
+                .map(<[u8; DIGEST_BYTES]>::as_slice),
+        )
+        .bind(event.request_id.as_deref())
+        .bind(&event.detail_json)
+        .bind(to_i64(event.occurred_at_micros)?)
+        .execute(&mut **transaction)
+        .await?;
     Ok(())
 }
 

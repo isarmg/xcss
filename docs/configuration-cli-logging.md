@@ -1,6 +1,6 @@
 # 公共配置、诊断、锁与日志
 
-本文描述1.0.0的公共实现。精确版本与不可变源码/资产分别记录，公开API只提供通用机制。
+本文描述当前公共实现。精确版本与不可变源码/资产分别记录，公开API只提供通用机制。
 
 ## 配置与入口
 
@@ -8,7 +8,7 @@
 
 `resolve_validated` 另接受 `Fn(&T, ConfigSource) -> Result<(), ConfigError>`，用于每层已有字段的内在约束，如地址语法、数值范围和密钥编码。尚未提供的必需凭据，以及路径、数据库、设备等外部前提，应在最终有效配置阶段验证；否则合法 CLI 覆盖无法修正默认部署路径。`Loaded.sources` 以 JSON pointer 返回每个有效叶字段的来源，不包含字段值。产品维护业务字段、默认值、环境映射及最终必要约束。
 
-Unix `read_private_file` 只读一个 700 私有目录中的 600 文件，要求当前用户所有、普通文件、单硬链接、无符号链接和稳定身份，读取上限 1 MiB。它不创建目录或锁文件。初始化与安全写入由产品显式执行，并复用既有文件安全实现。
+Unix `read_private_file` 只读一个 700 私有目录中的 600 文件，要求当前用户所有、普通文件、单硬链接、无符号链接和稳定身份，读取上限 1 MiB。它不创建目录或锁文件。首次安装由专用工具执行；运行中的业务写入复用现有文件安全实现。
 
 `xcss::server_cli` 提供机器错误输出、`CliError` 的安全 anyhow 边界和状态查询。机器错误 stdout 仅一个 `ErrorEnvelope` JSON 记录，失败退出码非零。`query_status` 在 3 秒和 4 KiB 边界内实际请求 `/readyz`，禁止代理和重定向，核对 `x-service` 及 HTTP 200/503 与 `ready` 的一致性。服务身份由产品外层 `service_identity_middleware` 注入。核心命令及业务成功条件由产品定义。
 
@@ -16,11 +16,14 @@ Unix `read_private_file` 只读一个 700 私有目录中的 600 文件，要求
 
 `request_context_middleware` 复用 native runtime 的同一请求边界：验证单个 bounded `x-request-id` 或生成编号，将具有类型约束的 `RequestId` 和 String 放入 extensions 并写入响应头。HTTP 400/500 的未编码 JSON 错误结构在 16 KiB、1 秒内附上同一编号和 no-store；成功流不缓冲，非错误结构的小 JSON 保留原值，过大/停滞错误体转安全内部错误。该层应在产品鉴权和输入中间件之外。
 
-`create_empty_private_directory` 仅接受空目录及合法公共锁文件，不覆盖未知状态。`create_runtime_log_directory` 只在显式初始化创建私有 `logs/`；`validate_runtime_log_directory` 只读验证既有目录。静态管理员只读检查复用 `StaticAdministratorStore::validate_persistent_accounts`，核验当前文件结构、账户及配置 ID，不保存、不创建账户或会话。
+`validate_runtime_log_directory` 只读验证已有私有日志目录。安装目录由专用工具建立；
+`server_layout::Layout` 从显式绝对 ROOT 解析当前 config、state、logs、run，不读取工具记录。
 
-## 一致的写入权
+## 运行写入权
 
-`.state-maintenance-pending.json`的任何目录项都阻止正常运行和在线写探针，包括损坏文件或悬空链接。独占维护锁允许持有者处理该门；普通共享锁不绕过它。`release(self)` 在业务资源全部关闭后显式 unlock；正常 Drop 也在关闭描述符前显式解锁，避免继承描述符继续占锁。
+`PrivateStateDirectory::try_instance_lock()` 只获取持久 `.state-instance.lock` 的独占 flock，
+不读取维护标记、工具身份或升级状态。工具通过系统服务管理控制停写，运行库不参与工具锁交接。
+`release(self)` 在业务资源关闭后显式 unlock；正常 Drop 也在关闭描述符前解锁，避免继承描述符继续占锁。
 
 ## 当前固定数据接口
 
@@ -29,8 +32,6 @@ Unix `read_private_file` 只读一个 700 私有目录中的 600 文件，要求
 | 接口 | 当前名称 | 作用 |
 |---|---|---|
 | 实例锁 | `.state-instance.lock` | 独占同一个状态目录的运行实例；锁文件 inode 持久保留 |
-| 维护锁 | `.state-maintenance.lock` | 日常运行共享持有、离线维护独占持有，协调写入权 |
-| 维护标记 | `.state-maintenance-pending.json` | 维护未完成时阻止正常启动，即使维护进程已退出 |
 | 原子写入临时文件 | `.state-atomic-{nonce}.tmp` | 在同一私有目录内准备替换；nonce 为 32 位小写十六进制随机值 |
 | HTTP 服务身份 | `x-service` | 响应绑定实际服务身份，状态命令严格核对 |
 | 生产管理会话 Cookie | `__Host-admin-{product}-session` | 按产品区分会话，保持 Path=/、HttpOnly、Secure、SameSite=Strict |
@@ -63,16 +64,18 @@ Unix `RotatingLogFile` 使用既有 700 目录、600 单链接文件和一个 wr
 
 ## 验证边界
 
-公共测试覆盖严格配置分层、秘密不回显、真实flock互斥/显式释放/维护门、WAL 当前提交与源字节不变、HTTP 解析拒绝、精确日志筛选、实际文件轮转与 sink 身份变化。xcss 在 Linux AMD64 GNU 原生验证。状态查询另用临时 HTTP 监听验证服务身份和实际就绪状态。这些公共测试不替代产品独立构建、实际发行物和设备验证。
+公共测试覆盖严格配置分层、秘密不回显、真实 flock 运行互斥及显式释放、WAL 当前提交与源字节不变、HTTP 解析拒绝、精确日志筛选、实际文件轮转与 sink 身份变化。xcss 在 Linux AMD64 GNU 原生验证。状态查询另用临时 HTTP 监听验证服务身份和实际就绪状态。这些公共测试不替代产品独立构建、实际发行物和设备验证。
 
-## 行政维护权限桥（0.10.8）
+## 私有目录的显式本机授权
 
-普通 `PrivateStateDirectory::open` 与 `PrivateDirectory::open_existing` 仍要求 effective uid 精确等于目录所有者。离线维护可明确使用 `open_for_administration`：仅 effective uid 0 或实际目录所有者允许，逐级 NOFOLLOW 打开已有实体 0700 目录，不创建、不 chmod/chown 现有对象。新 common lock 和原子 pending 文件以排他新 descriptor 生成，再 fchown 为目录实际 uid/gid，保持 0600 和单链接；已有错误 owner、mode 或链接拒绝，绝不修复后继续。
+普通 `PrivateStateDirectory::open` 与 `PrivateDirectory::open_existing` 仍要求 effective uid 精确等于目录所有者。明确的本机授权操作可使用 `open_for_administration`：仅 effective uid 0 或实际目录所有者允许，逐级 NOFOLLOW 打开已有实体 0700 目录，不创建、不 chmod/chown 现有对象。新私有文件以排他新 descriptor 生成，再 fchown 为目录实际 uid/gid，保持 0600 和单链接；已有错误 owner、mode 或链接拒绝，绝不修复后继续。
 
-`owner_uid/owner_gid` 返回实际身份；`MaintenanceLock::as_fd` 仅借用已持锁的描述符，不转移所有权或定义子进程协议。
+`owner_uid/owner_gid` 返回实际目录身份。该低层文件机制不包含安装或维护流程。
 
 ## 锁释放与继承文件描述符
 
-实例锁和维护锁的私有 RAII 运行时校验在成功获得 flock 后立即持有所有权，包含之后身份校验失败的清理路径。正常 Drop 在关闭描述符前显式解锁；即使短暂 fork/dup 的别名仍存在，也不会让已结束的维护继续占锁。清理只操作已持有的描述符，不重新打开、删除、改权限或修复路径。显式 `release()` 成功后会标记已释放，后续 Drop 不会解锁同一别名新取得的锁。
+实例锁的私有 RAII 运行时校验在成功获得 flock 后立即持有所有权，包含之后身份校验失败的清理路径。正常 Drop 在关闭描述符前显式解锁；即使短暂 fork/dup 的别名仍存在，也不会让已退出的运行实例继续占锁。清理只操作已持有的描述符，不重新打开、删除、改权限或修复路径。显式 `release()` 成功后会标记已释放，后续 Drop 不会解锁同一别名新取得的锁。
 
-原生回归覆盖别名仍存活时的隐式释放、实例与共享维护的释放顺序、显式交接后重新锁定、路径替换失败时只释放原 inode；目录身份、owner/mode 和持久维护标记检查继续执行。
+原生回归覆盖别名仍存活时的隐式释放、显式交接后重新锁定、路径替换失败时只释放原 inode；目录身份及 owner/mode 检查继续执行。
+
+公共 HTTP transport 使用 `CommonEvent` 的固定事件和共享日志出口，分类连接及监听错误；不注入或记录访客地址，不记录原始错误链。文件出口失败时同一结构记录回落到 stderr。

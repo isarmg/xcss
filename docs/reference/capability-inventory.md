@@ -8,7 +8,7 @@
 | --- | --- | --- | --- |
 | FND-001 | 构建期共享层，不运行中央 xcss service | 根 README、唯一 Cargo/npm 清单、无资源的状态合同 | 产品制品断网运行；xcss 不独立监听或运行 daemon |
 | FND-002 | 1 个 Rust crate 与 1 个 npm 软件包的内部模块共同发布 | 根 Cargo/npm 清单、`src/` 与 `web/` 内部模块 | 一个 crate、一个 tgz；模块选择不移除根 Rust 依赖；Web 外部 peer 按实际需求安装 |
-| FND-003 | 全组件当前清单版本 `1.0.13` | Cargo 软件包 version、npm 软件包 version、`xcss_policy.py` | repository 规则精确一致性检查 |
+| FND-003 | 全组件当前清单版本 `1.0.14` | Cargo 软件包 version、npm 软件包 version、`xcss_policy.py` | repository 规则精确一致性检查 |
 | FND-004 | 只提供唯一当前 API/合同/算法 | crate/package public API、严格的运行时校验、文档 | 不存在别名、dual reader/write、已弃用的导出入口 |
 | FND-006 | 公共认证、存储、运行时机制编入各产品，不拥有中央在线实例或产品业务数据 | `admin_core`、`admin_sqlite`、`server_runtime`、`platform_db` 等内部模块 | 产品拥有自己的管理员状态、业务 DB、文件树与进程；xcss 状态合同 resources 为空 |
 | FND-007 | 生产不依赖 GitHub/npm/xcss 在线可用 | 消费者 pin、编译/打包模型 | 构建后断网启动与核心功能验证 |
@@ -346,7 +346,7 @@
 | FND-342 | tool tar固定mtime=0/uid/gid/name/mode/order | asset builder | 双构建SHA相同 |
 | FND-343 | 发行 output必须安全、空、非root目录 | `prepare_output` | broad/nonempty/link目录负例 |
 | FND-344 | 发行要求工作树无tracked/untracked变化 | `verify_source` | porcelain必须空 |
-| FND-345 | 标签必须精确`v1.0.13`且唯一指向HEAD | `verify_source` | wrong/missing/multiple 标签负例 |
+| FND-345 | 标签必须精确`v1.0.14`且唯一指向HEAD | `verify_source` | wrong/missing/multiple 标签负例 |
 | FND-346 | 状态合同先生成再hash绑定发行身份 | asset builder顺序 | hash与Schema验证 |
 | FND-347 | build inventory记录工具链与两个lock hash | `inventory` | JSON内容与hash测试 |
 | FND-348 | inventory枚举1个Rust和1个npm组件 | cargo 元数据 + 软件包 discover | component集合检查 |
@@ -461,6 +461,5 @@ xcss::server_target（目标常量；整个 xcss crate 另有根编译硬门禁�
 | FND-412 | 同目录运行/维护/诊断写锁、持久维护门和通用维护描述符借用 | `xcss::state_file`；真实 flock、inode、pending、显式发行、持久维护门和真实owner/root权限测试 |
 | FND-413 | 当前 WAL/journal 代的只读临时数据库校验副本 | `xcss::sqlite::validation_snapshot`；源字节不变、writer busy、query-only与clone 运行时校验测试；仅独立诊断进程，不声明备份 |
 | FND-414 | 服务端结构化日志、公共事件模板、精确筛选和有界轮转 | `xcss::log`；UTC/脱敏/limits/query/真实rotation/tracing sink切换；GNU/Linux AMD64 原生验证与产品验收 |
-| FND-415 | 既有静态管理员只读检查、只在首次初始化写当前账户文件 | `xcss::admin_static`；当前格式与准确configured IDs、不创建文件、不改持久字节 |
 
 历史 v0.10.4 验收记录只证明其当时源码与状态，不作为当前单体的验收证据。当前正式版本、完整修订号、锁闭包、package/license 清单和产品发行物必须绑定同一实际源码并同步验收。API、适用边界和公共模块的实际消费入口见 [配置、CLI、锁与日志](../configuration-cli-logging.md)。

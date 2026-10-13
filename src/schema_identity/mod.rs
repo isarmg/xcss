@@ -23,6 +23,10 @@ pub const PRODUCT_METADATA_DDL: &str = r#"CREATE TABLE product_metadata (
     schema_sha256 TEXT NOT NULL
 )"#;
 
+/// Current fresh-install identity stamp. Bind values in the documented order;
+/// this never updates an existing stamp or converts another structure.
+pub const PRODUCT_METADATA_INSERT_SQL: &str = "INSERT INTO product_metadata(singleton, application, application_version, schema_revision, schema_sha256) VALUES(1, ?, ?, ?, ?)";
+
 /// Query that selects exactly the objects covered by fingerprint version 1.
 ///
 /// SQLite's default BINARY collation is part of the contract. Adapters must

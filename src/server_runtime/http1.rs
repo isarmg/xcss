@@ -1,7 +1,7 @@
 //! Bounded HTTP/1 transport with connection limits, deadlines and graceful shutdown.
 //! No filesystem, authentication, operation, or product-state semantics live here.
 
-use log_api::{info, warn};
+use crate::log::{CommonEvent, LogRecord};
 use rustix::event::{PollFd, PollFlags, Timespec, poll};
 use std::{
     future::Future,
@@ -178,11 +178,12 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for WriteIdleTimeout<T> {
 
 pub(crate) async fn accept_with_backoff(
     listener: &AsyncFd<StdTcpListener>,
+    service: &str,
     listener_addr: &str,
     shutdown: &CancellationToken,
     connection_slots: &Arc<Semaphore>,
     backoff: &mut AcceptBackoff,
-) -> Option<(TcpStream, SocketAddr, OwnedSemaphorePermit)> {
+) -> Option<(TcpStream, OwnedSemaphorePermit)> {
     loop {
         let readiness = tokio::select! {
             biased;
@@ -192,7 +193,7 @@ pub(crate) async fn accept_with_backoff(
         let mut readiness = match readiness {
             Ok(readiness) => readiness,
             Err(err) => {
-                if !wait_after_accept_error(listener_addr, shutdown, backoff, &err).await {
+                if !wait_after_accept_error(service, listener_addr, shutdown, backoff, &err).await {
                     return None;
                 }
                 continue;
@@ -212,7 +213,7 @@ pub(crate) async fn accept_with_backoff(
             }
             Err(err) => {
                 drop(readiness);
-                if !wait_after_accept_error(listener_addr, shutdown, backoff, &err).await {
+                if !wait_after_accept_error(service, listener_addr, shutdown, backoff, &err).await {
                     return None;
                 }
                 continue;
@@ -240,10 +241,12 @@ pub(crate) async fn accept_with_backoff(
         };
         drop(readiness);
         match accepted {
-            Ok((stream, addr)) => {
+            Ok((stream, _)) => {
                 if let Err(err) = stream.set_nonblocking(true) {
                     drop(connection_permit);
-                    if !wait_after_accept_error(listener_addr, shutdown, backoff, &err).await {
+                    if !wait_after_accept_error(service, listener_addr, shutdown, backoff, &err)
+                        .await
+                    {
                         return None;
                     }
                     continue;
@@ -252,7 +255,9 @@ pub(crate) async fn accept_with_backoff(
                     Ok(stream) => stream,
                     Err(err) => {
                         drop(connection_permit);
-                        if !wait_after_accept_error(listener_addr, shutdown, backoff, &err).await {
+                        if !wait_after_accept_error(service, listener_addr, shutdown, backoff, &err)
+                            .await
+                        {
                             return None;
                         }
                         continue;
@@ -262,11 +267,11 @@ pub(crate) async fn accept_with_backoff(
                 if shutdown.is_cancelled() {
                     return None;
                 }
-                return Some((stream, addr, connection_permit));
+                return Some((stream, connection_permit));
             }
             Err(err) => {
                 drop(connection_permit);
-                if !wait_after_accept_error(listener_addr, shutdown, backoff, &err).await {
+                if !wait_after_accept_error(service, listener_addr, shutdown, backoff, &err).await {
                     return None;
                 }
             }
@@ -282,13 +287,14 @@ fn listener_is_readable(listener: &StdTcpListener) -> io::Result<bool> {
 }
 
 async fn wait_after_accept_error(
+    service: &str,
     listener_addr: &str,
     shutdown: &CancellationToken,
     backoff: &mut AcceptBackoff,
     err: &io::Error,
 ) -> bool {
     let retry_delay = backoff.failure_delay();
-    log_accept_error(listener_addr, err, retry_delay);
+    log_accept_error(service, listener_addr, err, retry_delay);
     tokio::select! {
         biased;
         _ = shutdown.cancelled() => false,
@@ -321,15 +327,21 @@ impl AcceptBackoff {
     }
 }
 
-fn log_accept_error(listener_addr: &str, err: &std::io::Error, retry_delay: Duration) {
+fn log_accept_error(
+    service: &str,
+    listener_addr: &str,
+    err: &std::io::Error,
+    retry_delay: Duration,
+) {
     let category = classify_accept_error(err);
-    warn!(
-        "TCP accept error listener={listener_addr} category={category} io_kind={:?} \
-         os_error={:?} retry_ms={}",
-        err.kind(),
-        err.raw_os_error(),
-        retry_delay.as_millis()
-    );
+    let record = LogRecord::common(service, CommonEvent::HttpAcceptFailed)
+        .and_then(|record| record.with_attribute("listener", listener_addr))
+        .and_then(|record| record.with_attribute("category", category))
+        .and_then(|record| record.with_attribute("io_kind", format!("{:?}", err.kind())))
+        .and_then(|record| record.with_attribute("os_error", serde_json::json!(err.raw_os_error())))
+        .and_then(|record| record.with_attribute("retry_ms", retry_delay.as_millis() as u64))
+        .expect("validated service and bounded transport attributes form a log record");
+    emit_record(&record);
 }
 
 fn classify_accept_error(err: &std::io::Error) -> &'static str {
@@ -358,7 +370,7 @@ fn is_resource_exhaustion(err: &std::io::Error) -> bool {
 }
 
 pub(crate) fn log_connection_error(
-    addr: SocketAddr,
+    service: &str,
     request_seen: bool,
     err: &(dyn std::error::Error + Send + Sync + 'static),
 ) {
@@ -404,13 +416,24 @@ pub(crate) fn log_connection_error(
     let io_kind = io_kind
         .map(|kind| format!("{kind:?}"))
         .unwrap_or_else(|| "-".to_string());
-    let message = format!(
-        "HTTP connection error peer={addr} category={category} request_seen={request_seen} io_kind={io_kind} error={err:?}"
-    );
-    if category == "disconnect" {
-        info!("{message}");
+    let event = if category == "disconnect" {
+        CommonEvent::HttpConnectionClosed
     } else {
-        warn!("{message}");
+        CommonEvent::HttpConnectionFailed
+    };
+    let record = LogRecord::common(service, event)
+        .and_then(|record| record.with_attribute("category", category))
+        .and_then(|record| record.with_attribute("request_seen", request_seen))
+        .and_then(|record| record.with_attribute("io_kind", io_kind))
+        .expect("validated service and bounded transport attributes form a log record");
+    emit_record(&record);
+}
+
+fn emit_record(record: &LogRecord) {
+    if record.emit().is_err() {
+        // The same structured record remains observable when the persistent
+        // sink fails. No raw error chain, request contents or peer address.
+        let _ = record.emit_stderr();
     }
 }
 
@@ -418,7 +441,8 @@ fn find_io_error<'a>(
     err: &'a (dyn std::error::Error + Send + Sync + 'static),
 ) -> Option<&'a std::io::Error> {
     let mut current: Option<&'a (dyn std::error::Error + 'static)> = Some(err);
-    while let Some(error) = current {
+    for _ in 0..16 {
+        let Some(error) = current else { break };
         if let Some(io_error) = error.downcast_ref::<std::io::Error>() {
             return Some(io_error);
         }
@@ -473,6 +497,7 @@ mod tests {
         stop.cancel();
         assert!(
             !wait_after_accept_error(
+                "example-product",
                 "test",
                 &stop,
                 &mut AcceptBackoff::default(),

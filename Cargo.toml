@@ -1,5 +1,5 @@
 [package]
-"version" = "1.0.13"
+"version" = "1.0.14"
 "edition" = "2024"
 "rust-version" = "1.99"
 "authors" = ["sarmg <isarmg@163.com>"]
@@ -17,6 +17,7 @@
 "tracing" = []
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))'.dependencies]
+"schemars" = "=1.2.3"
 "argon2" = { "version" = "0.5", "features" = ["std"] }
 "base64" = { "version" = "0.23.1" }
 "getrandom" = { "version" = "0.4" }
@@ -57,7 +58,6 @@
 "uuid" = { "version" = "1", "features" = ["v4"] }
 "anyhow" = { "version" = "1" }
 "http" = { "version" = "1" }
-"log-api" = { "package" = "log", "version" = "0.4" }
 
 [target.'cfg(all(target_os = "linux", target_arch = "x86_64", target_env = "gnu"))'.dev-dependencies]
 "tokio-rustls" = "0.26.5"

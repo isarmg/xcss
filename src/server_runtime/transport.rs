@@ -5,17 +5,12 @@ use crate::server_runtime::{
     BoundListeners, Error, LifecycleParticipant, ProcessSignals, ServerRuntime, ShutdownFailure,
     ShutdownLimits, ShutdownPhase, ShutdownReport, request_service, wait_for_shutdown,
 };
-use axum::{
-    body::Body,
-    extract::{ConnectInfo, Request},
-    response::Response,
-};
+use axum::{body::Body, extract::Request, response::Response};
 use futures_util::{FutureExt, future::FusedFuture};
 use hyper::{body::Incoming, server::conn::http1, service::service_fn};
 use hyper_util::rt::{TokioIo, TokioTimer};
 use std::{
     convert::Infallible,
-    net::SocketAddr,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -89,6 +84,7 @@ impl ServerRuntime {
         }
         crate::server_runtime::install_panic_hook();
         let handle = self.handle();
+        let logging_service = handle.state.read().await.product.id.clone();
         let mut runtime_shutdown = handle.shutdown_signal();
         let stop = CancellationToken::new();
         if *runtime_shutdown.borrow() {
@@ -112,15 +108,33 @@ impl ServerRuntime {
                 request_service(service.clone()),
             );
             let label = listener.get_ref().local_addr()?.to_string();
+            let logging_service = logging_service.clone();
             listeners.spawn(async move {
                 let mut backoff = AcceptBackoff::default();
-                while let Some((socket, peer, permit)) =
-                    accept_with_backoff(&listener, &label, &stop, &slots, &mut backoff).await
+                while let Some((socket, permit)) = accept_with_backoff(
+                    &listener,
+                    &logging_service,
+                    &label,
+                    &stop,
+                    &slots,
+                    &mut backoff,
+                )
+                .await
                 {
                     let service = service.clone();
+                    let logging_service = logging_service.clone();
                     let (stop, force) = (stop.clone(), force.clone());
                     connections.spawn(async move {
-                        serve_connection(socket, peer, service, limits, stop, force, permit).await;
+                        serve_connection(
+                            socket,
+                            logging_service,
+                            service,
+                            limits,
+                            stop,
+                            force,
+                            permit,
+                        )
+                        .await;
                     });
                 }
             });
@@ -247,7 +261,7 @@ impl ServerRuntime {
 
 async fn serve_connection<S>(
     socket: tokio::net::TcpStream,
-    peer: SocketAddr,
+    logging_service: String,
     service: S,
     limits: Http1Limits,
     stop: CancellationToken,
@@ -261,8 +275,7 @@ async fn serve_connection<S>(
     let observed = seen.clone();
     let service = service_fn(move |request: hyper::Request<Incoming>| {
         observed.store(true, Ordering::Relaxed);
-        let mut request = request.map(Body::new);
-        request.extensions_mut().insert(ConnectInfo(peer));
+        let request = request.map(Body::new);
         service.clone().oneshot(request)
     });
     let mut builder = http1::Builder::new();
@@ -289,7 +302,7 @@ async fn serve_connection<S>(
         result = &mut connection => result,
     };
     if let Err(error) = result {
-        log_connection_error(peer, seen.load(Ordering::Relaxed), &error);
+        log_connection_error(&logging_service, seen.load(Ordering::Relaxed), &error);
     }
 }
 
@@ -298,6 +311,7 @@ mod tests {
     use super::*;
     use crate::server_runtime::ProductDescriptor;
     use axum::{Router, routing::get};
+    use std::net::SocketAddr;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
     async fn launch(
@@ -452,8 +466,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn real_peer_and_request_id_are_injected_and_idle_bind_does_not_reserve_capacity() {
-        let app = Router::new().route("/", get(|ConnectInfo(peer): ConnectInfo<SocketAddr>, headers: axum::http::HeaderMap| async move { format!("{} {}", peer.ip(), headers["x-request-id"].to_str().unwrap()) }));
+    async fn requests_have_correlation_without_peer_identity_and_idle_bind_does_not_reserve_capacity()
+     {
+        let app = Router::new().route(
+            "/",
+            get(|request: axum::extract::Request| async move {
+                assert!(
+                    request
+                        .extensions()
+                        .get::<axum::extract::ConnectInfo<SocketAddr>>()
+                        .is_none()
+                );
+                request.headers()["x-request-id"]
+                    .to_str()
+                    .unwrap()
+                    .to_owned()
+            }),
+        );
         let (address, handle, serving) = launch(
             Http1Limits {
                 max_connections: 1,
@@ -466,7 +495,7 @@ mod tests {
             let response = request(SocketAddr::new(ip.parse().unwrap(), address.port()), b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nX-Forwarded-For: 203.0.113.1\r\nX-Request-ID: socket-test\r\n\r\n").await;
             let response = String::from_utf8(response).unwrap();
             assert!(response.starts_with("HTTP/1.1 200"));
-            assert!(response.contains("127.0.0.1 socket-test"));
+            assert!(response.contains("socket-test"));
             assert_eq!(response.matches("x-request-id:").count(), 1);
         }
         handle.shutdown();

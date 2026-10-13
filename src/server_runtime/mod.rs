@@ -59,6 +59,7 @@ impl ProductDescriptor {
             ("profile", &self.profile),
         ] {
             if value.is_empty()
+                || value.len() > crate::log::MAX_IDENTIFIER_BYTES
                 || !value
                     .bytes()
                     .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_'))
@@ -67,7 +68,10 @@ impl ProductDescriptor {
             }
         }
         let bound = self.common_revision.len() == 40
-            && self.common_revision.bytes().all(|b| b.is_ascii_hexdigit());
+            && self
+                .common_revision
+                .bytes()
+                .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'));
         let development = cfg!(debug_assertions) && self.common_revision == "unbound";
         if !bound && !development {
             return Err(Error::InvalidDescriptor("common_revision"));
@@ -1034,6 +1038,11 @@ mod tests {
         assert!(product.validate().is_ok());
         product.common_revision.truncate(7);
         assert!(product.validate().is_err());
+        product.common_revision = "A".repeat(40);
+        assert!(product.validate().is_err());
+        product = descriptor();
+        product.id = "p".repeat(crate::log::MAX_IDENTIFIER_BYTES + 1);
+        assert!(product.validate().is_err());
     }
 
     #[tokio::test]
@@ -1298,19 +1307,9 @@ mod tests {
 
     #[tokio::test]
     async fn diagnostics_are_absent_for_both_anonymous_and_authenticated_requests() {
-        use crate::admin_core::{AdministratorRecord, AdministratorService, Identifier};
-        use axum::{body::Body, extract::ConnectInfo, http::header};
-        let store = crate::admin_static::StaticAdministratorStore::new([AdministratorRecord {
-            administrator_id: Identifier::new("admin-1").unwrap(),
-            username: "admin".into(),
-            password_hash: crate::admin_auth::hash_password("correct horse battery").unwrap(),
-            active: true,
-            session_version: 1,
-            created_at_micros: 1,
-            updated_at_micros: 1,
-            last_login_at_micros: None,
-        }])
-        .unwrap();
+        use crate::admin_core::AdministratorService;
+        use axum::{body::Body, http::header};
+        let store = crate::testkit::administrator_fixture("admin", "correct horse battery").await;
         let runtime = ServerRuntime::builder(descriptor())
             .with_schema_identity(
                 crate::schema_identity::SchemaIdentity::new("example", "1.0.0", 3, "a".repeat(64))
@@ -1369,7 +1368,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(anonymous.status(), StatusCode::NOT_FOUND);
-        let mut login = Request::post(crate::contracts::ADMIN_LOGIN_PATH)
+        let login = Request::post(crate::contracts::ADMIN_LOGIN_PATH)
             .header(header::HOST, "127.0.0.1")
             .header(header::ORIGIN, "http://127.0.0.1")
             .header("sec-fetch-site", "same-origin")
@@ -1378,12 +1377,6 @@ mod tests {
                 r#"{"username":"admin","password":"correct horse battery"}"#,
             ))
             .unwrap();
-        login
-            .extensions_mut()
-            .insert(ConnectInfo(std::net::SocketAddr::from((
-                [127, 0, 0, 1],
-                1234,
-            ))));
         let response = app.clone().oneshot(login).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let cookie = response.headers()[header::SET_COOKIE]

@@ -28,6 +28,48 @@ impl http_body::Body for PendingLoginBody {
 
 pub const ADMINISTRATOR_USERNAME: &str = "admin";
 pub const ADMINISTRATOR_PASSWORD: &str = "correct horse battery";
+
+/// Internal fixtures exercise the production SQLite store; no alternate
+/// account format or process-local session implementation is shipped.
+#[cfg(test)]
+pub(crate) async fn administrator_fixture(
+    username: &str,
+    password: &str,
+) -> crate::admin_sqlite::SqliteAdministratorStore {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    sqlx::raw_sql(crate::admin_sqlite::ADMIN_PERSISTENT_DDL)
+        .execute(&pool)
+        .await
+        .unwrap();
+    initialize_administrator_fixture(&pool, username, password, 1).await;
+    crate::admin_sqlite::SqliteAdministratorStore::new(pool)
+}
+
+#[cfg(test)]
+pub(crate) async fn initialize_administrator_fixture(
+    pool: &sqlx::SqlitePool,
+    username: &str,
+    password: &str,
+    now_micros: u64,
+) {
+    let now = i64::try_from(now_micros).unwrap();
+    sqlx::query(crate::admin_sqlite::ADMINISTRATOR_INSERT_SQL)
+        .bind("administrator-1")
+        .bind(username)
+        .bind(crate::admin_auth::hash_password(password).unwrap())
+        .bind(1_i64)
+        .bind(1_i64)
+        .bind(now)
+        .bind(now)
+        .bind(Option::<i64>::None)
+        .execute(pool)
+        .await
+        .unwrap();
+}
 const LOGIN_JSON: &str = r#"{"username":"admin","password":"correct horse battery"}"#;
 const REQUEST_ID: &str = "testkit-request-1";
 

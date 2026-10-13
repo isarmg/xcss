@@ -63,7 +63,7 @@ assert!(token_matches_hash(&token, &digest));
 expected digest，再使用恒定时间 equality。
 
 随机源失败时必须让会话创建失败，不能回退时间戳、普通UUID或PRNG。当前 `admin_core` 从同一会话令牌稳定派生 CSRF，不另生成随机 CSRF；会话表、TTL、撤销和 Cookie
-政策由公共实现固定，产品负责初始化与挂载。
+政策由公共实现固定，专用工具负责首次初始化，产品负责运行挂载。
 
 ## 原始 Cookie
 
@@ -96,7 +96,7 @@ assert_eq!(verified.port(), 443);
 协议方案与authority；模式决定https/http；解析DNS/IPv4/bracketed IPv6和端口；HTTP开发模式双方必须真实
 回环地址；最后比较规范化authority。
 
-生产behind proxy时，产品必须在可信代理边界形成一个外部有效Host。xcss不读取X-Forwarded-Host，
+入口配置由运维维护；Server 根据标准 Host/Origin 验证请求。xcss 不提供可信代理配置、不读取 X-Forwarded-Host，
 也不会在Host与`:authority`冲突时挑一个。
 
 ## CSRF
@@ -114,3 +114,7 @@ require_csrf_token_matches_hash(&[csrf_header_bytes], &stored_digest)?;
 ## WebSocket 来源
 
 `require_administrator_websocket_origin` 校验完整 Origin/Host，Fetch Metadata 可缺失，存在时须为唯一 `same-origin`。普通 HTTP 管理请求继续要求完整同源字段；来源检查之后仍需认证和授权。
+
+## 登录准入及构建导出
+
+当前次数、统计对象、计入事件、重置与 429 恢复，以及独立安装工具使用的构建期 JSON，见[认证与安装契约](../platform-specifications/administrator-authentication.md)。

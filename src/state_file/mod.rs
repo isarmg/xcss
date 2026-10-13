@@ -1,18 +1,15 @@
-//! Linux server state-file invariants shared by server products and their state maintenance.
+//! Linux server private state and runtime instance ownership.
 //!
 //! This is deliberately narrower than a general path-sandbox library. It owns
 //! one already-resolved private directory, direct child state files, stable
-//! device/inode checks, and the instance/maintenance lock protocol.
+//! device/inode checks, and the runtime instance lock.
 
 use rustix::fs::{FlockOperation, OFlags, flock};
 use std::{
     ffi::OsStr,
     fs::{self, DirBuilder, File, Metadata, OpenOptions},
     io,
-    os::{
-        fd::{AsFd, BorrowedFd},
-        unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
-    },
+    os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt},
     path::{Component, Path, PathBuf},
     sync::Arc,
 };
@@ -21,10 +18,6 @@ use thiserror::Error;
 pub const PRIVATE_DIRECTORY_MODE: u32 = 0o700;
 pub const PRIVATE_FILE_MODE: u32 = 0o600;
 pub const INSTANCE_LOCK_FILE: &str = ".state-instance.lock";
-pub const MAINTENANCE_LOCK_FILE: &str = ".state-maintenance.lock";
-/// Durable maintenance intent. Its presence prevents normal startup even
-/// after a crashed maintainer has released its advisory lock.
-pub const MAINTENANCE_PENDING_FILE: &str = ".state-maintenance-pending.json";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileIdentity {
@@ -101,7 +94,7 @@ impl PrivateStateDirectory {
         })
     }
 
-    /// Open an existing service-owned private directory for offline maintenance.
+    /// Open an existing service-owned private directory under an explicit local administrative identity.
     /// Only its owner or effective uid 0 is authorized. Every path component is
     /// opened without following links; newly created files retain the directory
     /// owner's uid/gid. This never creates, chmods, or chowns an existing object.
@@ -205,76 +198,18 @@ impl PrivateStateDirectory {
 
     pub fn try_instance_lock(&self) -> Result<InstanceLock, Error> {
         self.verify_identity()?;
-        let maintenance = self.create_file(MAINTENANCE_LOCK_FILE)?;
-        let maintenance = StateLock::acquire(
-            maintenance,
-            FlockOperation::NonBlockingLockShared,
-            LockKind::Maintenance,
-        )?;
-        // Check under the maintenance guard: a maintainer cannot create its
-        // intent between this check and acquisition of the runtime lock.
-        self.verify_no_pending_maintenance()?;
         let instance = self.create_file(INSTANCE_LOCK_FILE)?;
         let instance = StateLock::acquire(
             instance,
             FlockOperation::NonBlockingLockExclusive,
             LockKind::Instance,
         )?;
-        maintenance.verify_identity()?;
         instance.verify_identity()?;
         self.verify_identity()?;
         Ok(InstanceLock {
             directory: self.clone(),
-            _maintenance_guard: maintenance,
             _instance: instance,
         })
-    }
-
-    pub fn try_maintenance_lock(&self) -> Result<MaintenanceLock, Error> {
-        self.verify_identity()?;
-        let file = self.create_file(MAINTENANCE_LOCK_FILE)?;
-        let file = StateLock::acquire(
-            file,
-            FlockOperation::NonBlockingLockExclusive,
-            LockKind::Maintenance,
-        )?;
-        file.verify_identity()?;
-        self.verify_identity()?;
-        Ok(MaintenanceLock {
-            directory: self.clone(),
-            _file: file,
-        })
-    }
-
-    /// Coordinate an authorized online diagnostic with exclusive maintenance.
-    /// This does not grant runtime ownership or bypass pending maintenance intent.
-    pub fn try_shared_maintenance_lock(&self) -> Result<MaintenanceLock, Error> {
-        self.verify_identity()?;
-        let file = self.create_file(MAINTENANCE_LOCK_FILE)?;
-        let file = StateLock::acquire(
-            file,
-            FlockOperation::NonBlockingLockShared,
-            LockKind::Maintenance,
-        )?;
-        self.verify_no_pending_maintenance()?;
-        file.verify_identity()?;
-        self.verify_identity()?;
-        Ok(MaintenanceLock {
-            directory: self.clone(),
-            _file: file,
-        })
-    }
-
-    /// Read-only startup gate for a durable maintenance intent.
-    /// An unreadable or unexpected object must never be treated as no intent.
-    pub fn verify_no_pending_maintenance(&self) -> Result<(), Error> {
-        self.verify_identity()?;
-        let path = self.path.join(MAINTENANCE_PENDING_FILE);
-        match fs::symlink_metadata(&path) {
-            Ok(_) => Err(Error::MaintenancePending),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-            Err(source) => Err(Error::InspectPath { path, source }),
-        }
     }
 
     fn open_file(&self, name: &OsStr, create: bool) -> Result<SecureStateFile, Error> {
@@ -421,22 +356,13 @@ impl Drop for StateLock {
 #[derive(Debug)]
 pub struct InstanceLock {
     directory: PrivateStateDirectory,
-    // Drop the instance ownership before the shared maintenance gate.
     _instance: StateLock,
-    _maintenance_guard: StateLock,
-}
-
-#[derive(Debug)]
-pub struct MaintenanceLock {
-    directory: PrivateStateDirectory,
-    _file: StateLock,
 }
 
 impl InstanceLock {
     /// Call before handing a separately opened database to a storage driver.
     pub fn verify_identity(&self) -> Result<(), Error> {
         self.directory.verify_identity()?;
-        self._maintenance_guard.verify_identity()?;
         self._instance.verify_identity()
     }
 
@@ -445,35 +371,13 @@ impl InstanceLock {
     /// briefly by concurrently spawned processes before their exec boundary.
     pub fn release(mut self) -> Result<(), Error> {
         self.verify_identity()?;
-        self._instance.unlock()?;
-        self._maintenance_guard.unlock()
-    }
-}
-
-impl MaintenanceLock {
-    /// Borrow the already-held lock description for one controlled child
-    /// process. The owner retains its lifetime and must verify the directory
-    /// and lock identity before spawning; this does not transfer ownership.
-    pub fn as_fd(&self) -> BorrowedFd<'_> {
-        self._file.file().as_fd()
-    }
-
-    pub fn verify_identity(&self) -> Result<(), Error> {
-        self.directory.verify_identity()?;
-        self._file.verify_identity()
-    }
-
-    /// Complete the controlled maintenance handoff before starting the server.
-    pub fn release(mut self) -> Result<(), Error> {
-        self.verify_identity()?;
-        self._file.unlock()
+        self._instance.unlock()
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LockKind {
     Instance,
-    Maintenance,
 }
 
 fn try_flock(file: &File, operation: FlockOperation, kind: LockKind) -> Result<(), Error> {
@@ -640,8 +544,6 @@ fn require_identity(
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("data directory has an unfinished maintenance operation")]
-    MaintenancePending,
     #[error("state directory must be absolute: {path}", path = .path.display())]
     StateDirectoryNotAbsolute { path: PathBuf },
     #[error("state file name must be one normal direct child: {name}", name = .name.display())]
@@ -699,7 +601,7 @@ mod tests {
         if rustix::process::geteuid().as_raw() != 0 {
             let parent = private_tempdir()?;
             PrivateStateDirectory::open_for_administration(parent.path())?
-                .try_maintenance_lock()?
+                .try_instance_lock()?
                 .release()?;
             return Ok(());
         }
@@ -718,8 +620,8 @@ mod tests {
             (directory.owner_uid(), directory.owner_gid()),
             (65534, 65534)
         );
-        let lock = directory.try_maintenance_lock()?;
-        let metadata = fs::metadata(path.join(MAINTENANCE_LOCK_FILE))?;
+        let lock = directory.try_instance_lock()?;
+        let metadata = fs::metadata(path.join(INSTANCE_LOCK_FILE))?;
         assert_eq!(
             (
                 metadata.uid(),
@@ -757,11 +659,11 @@ mod tests {
         helper(65533, true)?;
         lock.release()?;
         directory
-            .create_file(MAINTENANCE_PENDING_FILE)?
+            .create_file("fixture-private.json")?
             .file()
             .sync_all()?;
         assert_eq!(
-            fs::metadata(path.join(MAINTENANCE_PENDING_FILE))?.uid(),
+            fs::metadata(path.join("fixture-private.json"))?.uid(),
             65534
         );
         let alias = parent.path().join("alias");
@@ -790,7 +692,7 @@ mod tests {
             let ordinary = PrivateStateDirectory::open(&path).unwrap();
             assert!(ordinary.try_instance_lock().is_err());
             let administrative = PrivateStateDirectory::open_for_administration(&path).unwrap();
-            assert!(administrative.try_maintenance_lock().is_err());
+            assert!(administrative.try_instance_lock().is_err());
         }
     }
 
@@ -865,18 +767,18 @@ mod tests {
             })
         ));
         assert!(matches!(
-            state.try_maintenance_lock(),
+            state.try_instance_lock(),
             Err(Error::LockUnavailable {
-                kind: LockKind::Maintenance,
+                kind: LockKind::Instance,
                 ..
             })
         ));
         drop(instance);
-        let _maintenance = state.try_maintenance_lock()?;
+        let _instance = state.try_instance_lock()?;
         assert!(matches!(
             state.try_instance_lock(),
             Err(Error::LockUnavailable {
-                kind: LockKind::Maintenance,
+                kind: LockKind::Instance,
                 ..
             })
         ));
@@ -884,65 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn durable_maintenance_intent_blocks_runtime_until_maintenance_handoff()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let parent = private_tempdir()?;
-        let state = PrivateStateDirectory::open(parent.path())?;
-        let maintenance = state.try_maintenance_lock()?;
-        let marker = state.create_file(MAINTENANCE_PENDING_FILE)?;
-        marker.file().sync_all()?;
-        state.verify_identity()?;
-        drop(marker);
-        drop(maintenance);
-        assert!(matches!(
-            state.try_instance_lock(),
-            Err(Error::MaintenancePending)
-        ));
-        let maintenance = state.try_maintenance_lock()?;
-        fs::remove_file(state.path().join(MAINTENANCE_PENDING_FILE))?;
-        File::open(state.path())?.sync_all()?;
-        drop(maintenance);
-        state.try_instance_lock()?.verify_identity()?;
-        Ok(())
-    }
-
-    #[test]
-    fn shared_diagnostics_block_maintenance_and_explicit_release_hands_off_aliases()
-    -> Result<(), Box<dyn std::error::Error>> {
-        let parent = private_tempdir()?;
-        let state = PrivateStateDirectory::open(parent.path())?;
-        let diagnostic = state.try_shared_maintenance_lock()?;
-        let runtime = state.try_instance_lock()?;
-        assert!(matches!(
-            state.try_maintenance_lock(),
-            Err(Error::LockUnavailable { .. })
-        ));
-        runtime.release()?;
-        assert!(matches!(
-            state.try_maintenance_lock(),
-            Err(Error::LockUnavailable { .. })
-        ));
-        diagnostic.release()?;
-        let maintenance = state.try_maintenance_lock()?;
-        let inherited = maintenance._file.file().try_clone()?;
-        maintenance.release()?;
-        let runtime = state.try_instance_lock()?;
-        let inherited_runtime = runtime._instance.file().try_clone()?;
-        runtime.release()?;
-        state.try_instance_lock()?.release()?;
-        drop(inherited_runtime);
-        drop(inherited);
-        state.create_file(MAINTENANCE_PENDING_FILE)?;
-        assert!(matches!(
-            state.try_shared_maintenance_lock(),
-            Err(Error::MaintenancePending)
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn held_lock_detects_replacement_and_symlink_intent_is_not_ignored()
-    -> Result<(), Box<dyn std::error::Error>> {
+    fn held_instance_lock_detects_replacement() -> Result<(), Box<dyn std::error::Error>> {
         let parent = private_tempdir()?;
         let state = PrivateStateDirectory::open(parent.path())?;
         let instance = state.try_instance_lock()?;
@@ -956,31 +800,23 @@ mod tests {
             Err(Error::FileIdentityChanged { .. })
         ));
         drop(instance);
-        symlink(
-            "missing-maintenance-intent",
-            state.path().join(MAINTENANCE_PENDING_FILE),
-        )?;
-        assert!(matches!(
-            state.try_instance_lock(),
-            Err(Error::MaintenancePending)
-        ));
         Ok(())
     }
     #[test]
-    fn implicit_drop_unlocks_maintenance_even_when_a_description_alias_survives()
+    fn implicit_drop_unlocks_instance_even_when_a_description_alias_survives()
     -> Result<(), Box<dyn std::error::Error>> {
         let parent = private_tempdir()?;
         let state = PrivateStateDirectory::open(parent.path())?;
-        let maintenance = state.try_maintenance_lock()?;
-        let alias = maintenance._file.file().try_clone()?;
+        let instance = state.try_instance_lock()?;
+        let alias = instance._instance.file().try_clone()?;
         let before = alias.metadata()?;
-        assert!(state.try_maintenance_lock().is_err());
-        drop(maintenance);
-        let replacement = state.try_maintenance_lock()?;
+        assert!(state.try_instance_lock().is_err());
+        drop(instance);
+        let replacement = state.try_instance_lock()?;
         drop(alias);
-        assert!(state.try_maintenance_lock().is_err());
+        assert!(state.try_instance_lock().is_err());
         replacement.verify_identity()?;
-        let after = fs::metadata(state.path().join(MAINTENANCE_LOCK_FILE))?;
+        let after = fs::metadata(state.path().join(INSTANCE_LOCK_FILE))?;
         assert_eq!(
             (
                 before.dev(),
@@ -1002,19 +838,16 @@ mod tests {
     }
 
     #[test]
-    fn implicit_instance_drop_unlocks_both_descriptions_without_unlinking_state()
+    fn implicit_instance_drop_unlocks_without_unlinking_state()
     -> Result<(), Box<dyn std::error::Error>> {
         let parent = private_tempdir()?;
         let state = PrivateStateDirectory::open(parent.path())?;
         let instance = state.try_instance_lock()?;
         let instance_alias = instance._instance.file().try_clone()?;
-        let maintenance_alias = instance._maintenance_guard.file().try_clone()?;
         let identity = instance._instance.identity();
         drop(instance);
-        state.try_maintenance_lock()?.release()?;
         let replacement = state.try_instance_lock()?;
         drop(instance_alias);
-        drop(maintenance_alias);
         assert!(state.try_instance_lock().is_err());
         assert_eq!(replacement._instance.identity(), identity);
         replacement.release()?;
@@ -1026,18 +859,18 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let parent = private_tempdir()?;
         let state = PrivateStateDirectory::open(parent.path())?;
-        let mut maintenance = state.try_maintenance_lock()?;
-        let alias = maintenance._file.file().try_clone()?;
-        maintenance._file.unlock()?;
+        let mut instance = state.try_instance_lock()?;
+        let alias = instance._instance.file().try_clone()?;
+        instance._instance.unlock()?;
         try_flock(
             &alias,
             FlockOperation::NonBlockingLockExclusive,
-            LockKind::Maintenance,
+            LockKind::Instance,
         )?;
-        drop(maintenance);
-        assert!(state.try_maintenance_lock().is_err());
+        drop(instance);
+        assert!(state.try_instance_lock().is_err());
         alias.unlock()?;
-        state.try_maintenance_lock()?.release()?;
+        state.try_instance_lock()?.release()?;
         Ok(())
     }
 
@@ -1046,16 +879,16 @@ mod tests {
     -> Result<(), Box<dyn std::error::Error>> {
         let parent = private_tempdir()?;
         let state = PrivateStateDirectory::open(parent.path())?;
-        let maintenance = state.try_maintenance_lock()?;
-        let alias = maintenance._file.file().try_clone()?;
-        let original_identity = maintenance._file.identity();
+        let instance = state.try_instance_lock()?;
+        let alias = instance._instance.file().try_clone()?;
+        let original_identity = instance._instance.identity();
         fs::rename(
-            state.path().join(MAINTENANCE_LOCK_FILE),
+            state.path().join(INSTANCE_LOCK_FILE),
             state.path().join("original-lock"),
         )?;
-        let replacement = state.try_maintenance_lock()?;
+        let replacement = state.try_instance_lock()?;
         assert!(matches!(
-            maintenance.release(),
+            instance.release(),
             Err(Error::FileIdentityChanged { .. })
         ));
         // release's identity check fails, but ownership cleanup still unlocks
@@ -1063,9 +896,9 @@ mod tests {
         try_flock(
             &alias,
             FlockOperation::NonBlockingLockExclusive,
-            LockKind::Maintenance,
+            LockKind::Instance,
         )?;
-        assert!(state.try_maintenance_lock().is_err());
+        assert!(state.try_instance_lock().is_err());
         let old_metadata = fs::metadata(state.path().join("original-lock"))?;
         assert_eq!(
             FileIdentity::from_metadata(&old_metadata),

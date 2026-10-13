@@ -8,14 +8,6 @@ state = "current"
 owner = "foundation"
 state = "current"
 
-[capabilities.admin-static]
-owner = "foundation"
-state = "current"
-
-[capabilities.memory-sessions]
-owner = "foundation"
-state = "current"
-
 [capabilities.server-runtime]
 owner = "foundation"
 state = "current"

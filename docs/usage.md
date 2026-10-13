@@ -6,7 +6,7 @@
 
 1. 用 `xcss::config` 组合产品配置，再验证实际运行前提。
 2. 用 `fs_safety` 和 `state_file` 打开产品私有状态、取得运行锁。
-3. 选择 `admin_sqlite` 或 `admin_static`，验证当前管理员状态。
+3. 使用 `admin_sqlite` 验证当前唯一管理员及持久会话状态。
 4. 挂载公共认证适配器，再组合产品业务路由。
 5. 向 `ServerRuntime` 注册健康检查、后台任务和最后关闭资源的参与者，运行 HTTP 服务。
 

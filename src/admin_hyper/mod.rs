@@ -1,5 +1,5 @@
 //! Hyper integration for the exact administrator semantics implemented by the
-//! xcss Axum router. The wrapper adapts only body and peer-address types;
+//! xcss Axum router. The wrapper adapts only body types;
 //! it intentionally owns no second authentication handler implementation.
 
 use crate::admin_auth::AdministratorOriginMode;
@@ -8,12 +8,11 @@ use crate::admin_core::{AdministratorService, AdministratorStore};
 use axum::{
     Router,
     body::Body,
-    extract::ConnectInfo,
     http::{Request, Response},
 };
 use bytes::Bytes;
 use http_body::Body as HttpBody;
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
 use tower::ServiceExt;
 
 #[derive(Clone, Debug)]
@@ -44,24 +43,15 @@ impl HyperAdministratorRouter {
             || path.starts_with("/api/v1/auth/")
     }
 
-    pub async fn handle_incoming(
-        &self,
-        request: Request<hyper::body::Incoming>,
-        peer: SocketAddr,
-    ) -> Response<Body> {
-        self.handle(request, peer).await
+    pub async fn handle_incoming(&self, request: Request<hyper::body::Incoming>) -> Response<Body> {
+        self.handle(request).await
     }
 
-    pub async fn handle<InputBody>(
-        &self,
-        mut request: Request<InputBody>,
-        peer: SocketAddr,
-    ) -> Response<Body>
+    pub async fn handle<InputBody>(&self, request: Request<InputBody>) -> Response<Body>
     where
         InputBody: HttpBody<Data = Bytes> + Send + 'static,
         InputBody::Error: Into<axum::BoxError>,
     {
-        request.extensions_mut().insert(ConnectInfo(peer));
         let request = request.map(Body::new);
         match self.router.clone().oneshot(request).await {
             Ok(response) => response,
@@ -73,8 +63,6 @@ impl HyperAdministratorRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::admin_core::{AdministratorRecord, Identifier};
-    use crate::admin_static::StaticAdministratorStore;
     use axum::http::{Method, StatusCode, header};
 
     #[tokio::test]
@@ -93,10 +81,13 @@ mod tests {
         let service = Arc::new(AdministratorService::new(
             crate::admin_sqlite::SqliteAdministratorStore::new(pool),
         ));
-        service
-            .bootstrap_administrator("admin", crate::testkit::ADMINISTRATOR_PASSWORD, 1)
-            .await
-            .unwrap();
+        crate::testkit::initialize_administrator_fixture(
+            service.store().pool(),
+            "admin",
+            crate::testkit::ADMINISTRATOR_PASSWORD,
+            1,
+        )
+        .await;
         let router = HyperAdministratorRouter::new(
             "example-product",
             AdministratorOriginMode::LoopbackDevelopmentHttp,
@@ -106,29 +97,18 @@ mod tests {
         crate::testkit::assert_administrator_management_http_contract(|request| {
             let router = router.clone();
             assert!(HyperAdministratorRouter::owns_path(request.uri().path()));
-            async move {
-                router
-                    .handle(request, SocketAddr::from(([127, 0, 0, 1], 1234)))
-                    .await
-            }
+            async move { router.handle(request).await }
         })
         .await;
     }
 
     #[tokio::test]
     async fn shared_administrator_wire_contract() {
-        let store = StaticAdministratorStore::new([AdministratorRecord {
-            administrator_id: Identifier::new("administrator-1").unwrap(),
-            username: crate::testkit::ADMINISTRATOR_USERNAME.into(),
-            password_hash: crate::admin_auth::hash_password(crate::testkit::ADMINISTRATOR_PASSWORD)
-                .unwrap(),
-            active: true,
-            session_version: 1,
-            created_at_micros: 1,
-            updated_at_micros: 1,
-            last_login_at_micros: None,
-        }])
-        .unwrap();
+        let store = crate::testkit::administrator_fixture(
+            crate::testkit::ADMINISTRATOR_USERNAME,
+            crate::testkit::ADMINISTRATOR_PASSWORD,
+        )
+        .await;
         let router = HyperAdministratorRouter::new(
             "example-product",
             AdministratorOriginMode::LoopbackDevelopmentHttp,
@@ -138,11 +118,7 @@ mod tests {
         crate::testkit::assert_administrator_http_contract(
             |request| {
                 let router = router.clone();
-                async move {
-                    router
-                        .handle(request, SocketAddr::from(([127, 0, 0, 1], 1234)))
-                        .await
-                }
+                async move { router.handle(request).await }
             },
             "example-product",
         )
@@ -151,17 +127,7 @@ mod tests {
 
     #[tokio::test]
     async fn hyper_body_path_uses_the_shared_router() {
-        let store = StaticAdministratorStore::new([AdministratorRecord {
-            administrator_id: Identifier::new("administrator-1").unwrap(),
-            username: "admin".into(),
-            password_hash: crate::admin_auth::hash_password("correct horse battery").unwrap(),
-            active: true,
-            session_version: 1,
-            created_at_micros: 1,
-            updated_at_micros: 1,
-            last_login_at_micros: None,
-        }])
-        .unwrap();
+        let store = crate::testkit::administrator_fixture("admin", "correct horse battery").await;
         let router = HyperAdministratorRouter::new(
             "example-product",
             AdministratorOriginMode::LoopbackDevelopmentHttp,
@@ -179,9 +145,7 @@ mod tests {
                 r#"{"username":"admin","password":"correct horse battery"}"#,
             ))
             .unwrap();
-        let response = router
-            .handle(request, SocketAddr::from(([127, 0, 0, 1], 1234)))
-            .await;
+        let response = router.handle(request).await;
         assert_eq!(response.status(), StatusCode::OK);
         assert!(
             response

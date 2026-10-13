@@ -43,16 +43,18 @@ class DependencyBoundaryTests(unittest.TestCase):
                     check_dependency_boundaries(self.root)
 
     def test_rust_self_dependencies_and_independent_internal_aliases_are_rejected(self) -> None:
-        for package in ("xcss", "xcss-error"):
-            self.crate.write_text(f"[dependencies]\nlocal = {{ package = '{package}', path = '.', version = '={CURRENT_VERSION}' }}\n")
-            with self.assertRaisesRegex(XcssPolicyError, "package boundary"):
-                check_dependency_boundaries(self.root)
+        self.crate.write_text(f"[dependencies]\nlocal = {{ package = 'xcss', version = '={CURRENT_VERSION}' }}\n")
+        with self.assertRaisesRegex(XcssPolicyError, "package boundary"):
+            check_dependency_boundaries(self.root)
+        self.crate.write_text("[dependencies]\nlocal = { package = 'unrelated-codec', path = '.' }\n")
+        with self.assertRaisesRegex(XcssPolicyError, "external local dependency"):
+            check_dependency_boundaries(self.root)
 
     def test_rust_workspace_and_patch_dependencies_obey_the_same_boundary(self) -> None:
         for scope in ("workspace.dependencies", "patch.crates-io", "replace"):
             with self.subTest(scope=scope):
                 self.cargo.write_text(f"[{scope}]\nlocal = {{ package = 'xcss-product', path = '../product' }}\n")
-                with self.assertRaisesRegex(XcssPolicyError, "package boundary"):
+                with self.assertRaisesRegex(XcssPolicyError, "external local dependency"):
                     check_dependency_boundaries(self.root)
 
     def test_rust_external_path_cannot_reach_a_consumer(self) -> None:
@@ -88,10 +90,16 @@ class DependencyBoundaryTests(unittest.TestCase):
     def test_web_self_dependencies_are_rejected_and_external_libraries_allowed(self) -> None:
         self.package.write_text(json.dumps({"dependencies": {"react": "19.3.0"}}))
         check_dependency_boundaries(self.root)
-        for name in ("@xcss/web", "@xcss/admin-ui"):
+        for name in ("@xcss/web",):
             self.package.write_text(json.dumps({"dependencies": {name: CURRENT_VERSION}}))
             with self.assertRaisesRegex(XcssPolicyError, "package boundary"):
                 check_dependency_boundaries(self.root)
+
+
+    def test_prefixes_do_not_infer_dependency_ownership(self) -> None:
+        self.crate.write_text("[dependencies]\ncodec={package='xcss-independent-codec',version='1.0'}\n")
+        self.package.write_text(json.dumps({"dependencies": {"@xcss/independent-codec": "1.0.0"}}))
+        check_dependency_boundaries(self.root)
 
 
 class CleanBuildDependencyTests(unittest.TestCase):

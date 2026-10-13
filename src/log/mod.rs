@@ -82,6 +82,9 @@ pub enum CommonEvent {
     RuntimeStopped,
     DependencyUnavailable,
     TaskFailed,
+    HttpAcceptFailed,
+    HttpConnectionFailed,
+    HttpConnectionClosed,
     MaintenanceStarted,
     MaintenanceCompleted,
 }
@@ -92,7 +95,7 @@ impl CommonEvent {
             .into_iter()
             .find(|event| event.definition().1 == name)
     }
-    const ALL: [Self; 9] = [
+    const ALL: [Self; 12] = [
         Self::ConfigLoaded,
         Self::InitializationCompleted,
         Self::RuntimeStarted,
@@ -100,11 +103,32 @@ impl CommonEvent {
         Self::RuntimeStopped,
         Self::DependencyUnavailable,
         Self::TaskFailed,
+        Self::HttpAcceptFailed,
+        Self::HttpConnectionFailed,
+        Self::HttpConnectionClosed,
         Self::MaintenanceStarted,
         Self::MaintenanceCompleted,
     ];
     fn definition(self) -> (&'static str, &'static str, Level, &'static str) {
         match self {
+            Self::HttpAcceptFailed => (
+                "http",
+                "common.http.accept_failed",
+                Level::Warn,
+                "HTTP listener could not accept a connection.",
+            ),
+            Self::HttpConnectionFailed => (
+                "http",
+                "common.http.connection_failed",
+                Level::Warn,
+                "HTTP connection failed.",
+            ),
+            Self::HttpConnectionClosed => (
+                "http",
+                "common.http.connection_closed",
+                Level::Info,
+                "HTTP connection closed.",
+            ),
             Self::ConfigLoaded => (
                 "config",
                 "common.config.loaded",

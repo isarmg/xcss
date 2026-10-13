@@ -389,8 +389,12 @@ def _verify_cargo_lock(
         raise ConformanceError(f"{lock_path}: xcss Rust dependencies require a lock file")
     lock = _toml(lock_path)
     entries = lock.get("package", [])
-    if not isinstance(entries, list):
+    if not isinstance(entries, list) or any(not isinstance(entry, dict) for entry in entries):
         raise ConformanceError(f"{lock_path}: invalid package list")
+    for entry in entries:
+        source = str(entry.get("source", ""))
+        if (source.startswith(f"git+{FOUNDATION_GIT_URL}?") or source.startswith(f"git+{FOUNDATION_GIT_URL}#") or source == f"git+{FOUNDATION_GIT_URL}") and entry.get("name") != "xcss":
+            raise ConformanceError(f"{lock_path}: official xcss source resolves an additional Rust package")
     for package in sorted(packages):
         matching = [
             entry
@@ -399,10 +403,9 @@ def _verify_cargo_lock(
             and entry.get("name") == package
             and entry.get("version") == expected_version
             and isinstance(entry.get("source"), str)
-            and entry["source"].startswith(f"git+{FOUNDATION_GIT_URL}?")
-            and entry["source"].endswith(f"#{expected_revision}")
+            and entry["source"] == f"git+{FOUNDATION_GIT_URL}?rev={expected_revision}#{expected_revision}"
         ]
-        if len(matching) != 1:
+        if len(matching) != 1 or sum(entry.get("name") == package for entry in entries) != 1:
             raise ConformanceError(
                 f"{lock_path}: expected one locked {package} {expected_version} from xcss revision {expected_revision}"
             )
@@ -494,7 +497,7 @@ def _discover_web_package(product_root: Path, configured: Path | None) -> Path |
                 package.get(section, {}) if isinstance(package.get(section, {}), dict) else {}
             )
         }
-        if any(name.startswith("@xcss/") for name in dependencies):
+        if "@xcss/web" in dependencies:
             candidates.append(path)
     if len(candidates) > 1:
         raise ConformanceError(
@@ -541,8 +544,8 @@ def verify_source(product_root: Path, foundation_root: Path) -> dict[str, Any]:
                 findings.append(("immutable-foundation-dependencies", str(error)))
                 continue
             dependency = _dependency_name(alias, resolved)
-            if dependency.startswith("xcss-"):
-                findings.append(("single-foundation-package", f"{path}: independent {dependency} was removed; declare the single xcss package"))
+            if isinstance(resolved, dict) and resolved.get("git") == FOUNDATION_GIT_URL and dependency != "xcss":
+                findings.append(("single-foundation-package", f"{path}: official xcss source declares an additional Rust package {dependency}"))
                 continue
             if dependency not in foundation_packages:
                 continue
@@ -576,8 +579,8 @@ def verify_source(product_root: Path, foundation_root: Path) -> dict[str, Any]:
             if not isinstance(dependencies, dict):
                 continue
             for dependency, requirement in dependencies.items():
-                if dependency.startswith("@xcss/") and dependency != "@xcss/web":
-                    findings.append(("single-foundation-package", f"{path}: independent {dependency} was removed; declare @xcss/web and import its subpaths"))
+                if isinstance(requirement, str) and requirement.startswith("https://github.com/isarmg/xcss/releases/download/") and dependency != "@xcss/web":
+                    findings.append(("single-foundation-package", f"{path}: official xcss asset is bound to an incorrect package identity {dependency}"))
                     continue
                 if dependency not in foundation_packages:
                     continue
@@ -693,8 +696,8 @@ def verify_web(product_root: Path, foundation_root: Path) -> dict[str, Any]:
         dependencies = package.get(section, {})
         if isinstance(dependencies, dict):
             for dependency, requirement in dependencies.items():
-                if dependency.startswith("@xcss/") and dependency != "@xcss/web":
-                    raise ConformanceError(f"{package_path}: independent {dependency} was removed; declare @xcss/web and import its subpaths")
+                if isinstance(requirement, str) and requirement.startswith("https://github.com/isarmg/xcss/releases/download/") and dependency != "@xcss/web":
+                    raise ConformanceError(f"{package_path}: official xcss asset is bound to an incorrect package identity {dependency}")
                 if dependency not in foundation_packages:
                     continue
                 if not isinstance(requirement, str):

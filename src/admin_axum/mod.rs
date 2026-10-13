@@ -501,6 +501,23 @@ where
     StoreError: std::error::Error + Send + Sync + 'static,
 {
     match failure {
+        ServiceError::LoginAttemptsExceeded {
+            retry_after_seconds,
+        } => {
+            let mut response = error_with_details(
+                StatusCode::TOO_MANY_REQUESTS,
+                crate::admin_core::LOGIN_ATTEMPTS_ERROR_CODE,
+                true,
+                request_id,
+                serde_json::Map::from_iter([("retry_after".into(), retry_after_seconds.into())]),
+            );
+            response.headers_mut().insert(
+                header::RETRY_AFTER,
+                HeaderValue::from_str(&retry_after_seconds.to_string())
+                    .expect("bounded retry seconds are a valid header"),
+            );
+            response
+        }
         ServiceError::InvalidCredentials => error(
             StatusCode::UNAUTHORIZED,
             "auth.invalid_credentials",
@@ -525,10 +542,7 @@ where
             false,
             request_id,
         ),
-        ServiceError::AdministratorNotFound
-        | ServiceError::Policy(_)
-        | ServiceError::Store(_)
-        | ServiceError::Contract(_) => error(
+        ServiceError::Policy(_) | ServiceError::Store(_) | ServiceError::Contract(_) => error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "platform.internal",
             false,
@@ -559,13 +573,23 @@ fn error(
     retryable: bool,
     request_id: Option<&RequestId>,
 ) -> Response {
+    error_with_details(status, code, retryable, request_id, Default::default())
+}
+
+fn error_with_details(
+    status: StatusCode,
+    code: &'static str,
+    retryable: bool,
+    request_id: Option<&RequestId>,
+    details: serde_json::Map<String, serde_json::Value>,
+) -> Response {
     let code = ErrorCode::new(code).expect("static adapter error codes are canonical");
     let envelope = ErrorEnvelope {
         message: code.as_str().replace('.', " "),
         code,
         request_id: request_id.cloned(),
         retryable,
-        details: Default::default(),
+        details,
     };
     let mut response = no_store((status, axum::Json(envelope)).into_response());
     response.extensions_mut().insert(XcssErrorResponse);
@@ -583,8 +607,6 @@ fn no_store(mut response: Response) -> Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::admin_core::{AdministratorRecord, Identifier};
-    use crate::admin_static::StaticAdministratorStore;
     use axum::body::to_bytes;
     use axum::extract::ConnectInfo;
     use axum::http::{Method, Request as HttpRequest};
@@ -607,18 +629,8 @@ mod tests {
         request
     }
 
-    fn router() -> Router {
-        let store = StaticAdministratorStore::new([AdministratorRecord {
-            administrator_id: Identifier::new("administrator-1").unwrap(),
-            username: "admin".into(),
-            password_hash: crate::admin_auth::hash_password("correct horse battery").unwrap(),
-            active: true,
-            session_version: 1,
-            created_at_micros: 1,
-            updated_at_micros: 1,
-            last_login_at_micros: None,
-        }])
-        .unwrap();
+    async fn router() -> Router {
+        let store = crate::testkit::administrator_fixture("admin", "correct horse battery").await;
         administrator_router(
             "example-product",
             AdministratorOriginMode::LoopbackDevelopmentHttp,
@@ -628,8 +640,82 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn login_attempts_return_429_and_recover_without_success_reset() {
+        use crate::admin_core::{AdministratorStore, LOGIN_ATTEMPTS_MAX};
+        let store = crate::testkit::administrator_fixture("admin", "correct horse battery").await;
+        let state = store.authentication_state().await.unwrap();
+        let service = Arc::new(AdministratorService::new(store));
+        let router = administrator_router(
+            "example-product",
+            AdministratorOriginMode::LoopbackDevelopmentHttp,
+            service,
+        )
+        .unwrap();
+        for _ in 0..LOGIN_ATTEMPTS_MAX - 2 {
+            state.admit_login_attempt().unwrap();
+        }
+        let failed = router
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                ADMIN_LOGIN_PATH,
+                r#"{"username":"admin","password":"incorrect password"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(failed.status(), StatusCode::UNAUTHORIZED);
+        let success = router
+            .clone()
+            .oneshot(request(
+                Method::POST,
+                ADMIN_LOGIN_PATH,
+                r#"{"username":"admin","password":"correct horse battery"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(success.status(), StatusCode::OK);
+        let mut login = request(
+            Method::POST,
+            ADMIN_LOGIN_PATH,
+            r#"{"username":"other-user","password":"incorrect password"}"#,
+        );
+        login
+            .headers_mut()
+            .insert("x-forwarded-for", "192.0.2.4".parse().unwrap());
+        let limited = router.clone().oneshot(login).await.unwrap();
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+        let retry_after = limited.headers()[header::RETRY_AFTER]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert!((1..=60).contains(&retry_after));
+        assert!(
+            limited.headers()[header::CACHE_CONTROL]
+                .to_str()
+                .unwrap()
+                .contains("no-store")
+        );
+        let envelope: ErrorEnvelope =
+            serde_json::from_slice(&to_bytes(limited.into_body(), 4096).await.unwrap()).unwrap();
+        assert_eq!(envelope.code.as_str(), "auth.login_attempts_exceeded");
+        assert!(envelope.retryable);
+        assert_eq!(envelope.details["retry_after"], retry_after);
+        state.elapse_window_for_test();
+        let restored = router
+            .oneshot(request(
+                Method::POST,
+                ADMIN_LOGIN_PATH,
+                r#"{"username":"admin","password":"correct horse battery"}"#,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(restored.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
     async fn verified_access_log_metadata_survives_logout_without_credentials() {
-        let router = router();
+        let router = router().await;
         let bad = router
             .clone()
             .oneshot(request(
@@ -714,10 +800,13 @@ mod tests {
         let service = Arc::new(AdministratorService::new(
             crate::admin_sqlite::SqliteAdministratorStore::new(pool),
         ));
-        service
-            .bootstrap_administrator("admin", crate::testkit::ADMINISTRATOR_PASSWORD, 1)
-            .await
-            .unwrap();
+        crate::testkit::initialize_administrator_fixture(
+            service.store().pool(),
+            "admin",
+            crate::testkit::ADMINISTRATOR_PASSWORD,
+            1,
+        )
+        .await;
         let router = administrator_router(
             "example-product",
             AdministratorOriginMode::LoopbackDevelopmentHttp,
@@ -735,8 +824,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn static_profile_has_no_management_routes() {
-        let router = router();
+    async fn retired_administrator_routes_are_not_registered() {
+        let router = router().await;
         for (method, path) in [
             (
                 Method::GET,
@@ -769,7 +858,7 @@ mod tests {
 
     #[tokio::test]
     async fn shared_administrator_wire_contract() {
-        let application = router();
+        let application = router().await;
         crate::testkit::assert_administrator_http_contract(
             |mut request| {
                 let application = application.clone();
@@ -785,7 +874,7 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_duplicate_origin_and_unknown_json() {
-        let application = router();
+        let application = router().await;
         let mut duplicate = request(
             Method::POST,
             ADMIN_LOGIN_PATH,
@@ -818,6 +907,7 @@ mod tests {
     #[tokio::test]
     async fn successful_login_uses_admin_cookie_and_contract() {
         let response = router()
+            .await
             .oneshot(request(
                 Method::POST,
                 ADMIN_LOGIN_PATH,

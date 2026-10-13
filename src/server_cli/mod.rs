@@ -24,7 +24,7 @@ pub use crate::sqlite::{
     SnapshotError, SnapshotLimits, ValidationSnapshot, ValidationSnapshotPool,
     open_validation_snapshot, open_validation_snapshot_with_connection_limits,
 };
-pub use crate::state_file::{INSTANCE_LOCK_FILE, MAINTENANCE_LOCK_FILE, MAINTENANCE_PENDING_FILE};
+pub use crate::state_file::INSTANCE_LOCK_FILE;
 
 pub const SERVICE_IDENTITY_HEADER: &str = "x-service";
 pub const STATUS_TIMEOUT: Duration = Duration::from_secs(3);
@@ -54,14 +54,10 @@ fn failure(code: &'static str, message: &'static str) -> ErrorEnvelope {
 pub fn state_error(error: &crate::state_file::Error) -> ErrorEnvelope {
     use crate::state_file::Error;
     match error {
-        Error::MaintenancePending => failure(
-            "state.maintenance_pending",
-            "The data directory has an unfinished maintenance operation.",
-        ),
         Error::LockUnavailable { source, .. } if source.kind() == io::ErrorKind::WouldBlock => {
             failure(
                 "state.lock_busy",
-                "The data directory is in use by another runtime or maintenance operation.",
+                "The data directory is in use by another runtime.",
             )
             .retryable(true)
         }
@@ -364,48 +360,6 @@ fn write_error(
     }
 }
 
-/// Read-only persistent maintenance intent check. Call after the runtime lock
-/// is acquired as well, so older consumers can adopt the same durable gate.
-pub fn runtime_allowed(data_dir: &Path) -> Result<(), ErrorEnvelope> {
-    let directory = crate::state_file::PrivateStateDirectory::open(data_dir)
-        .map_err(|error| state_error(&error))?;
-    directory
-        .verify_no_pending_maintenance()
-        .map_err(|error| state_error(&error))
-}
-
-pub fn validate_static_administrator_accounts(
-    directory: &Path,
-    configured_ids: &[String],
-) -> Result<(), ErrorEnvelope> {
-    let directory = crate::fs_safety::PrivateDirectory::open_existing(directory).map_err(|_| {
-        failure(
-            "unsafe_state_directory",
-            "The administrator directory must be a private current directory.",
-        )
-    })?;
-    crate::admin_static::StaticAdministratorStore::validate_persistent_accounts(&directory, configured_ids)
-        .map_err(|_| failure("invalid_administrator_accounts", "The persisted administrator accounts do not satisfy the current configured identities and account contract."))
-}
-
-/// Only explicit initialization creates the bounded runtime log directory.
-pub fn create_runtime_log_directory(data_dir: &Path) -> Result<(), ErrorEnvelope> {
-    let directory = crate::fs_safety::PrivateDirectory::open_existing(data_dir).map_err(|_| {
-        failure(
-            "unsafe_state_directory",
-            "The data directory must be private and current.",
-        )
-    })?;
-    let name = crate::fs_safety::EntryName::new("logs").expect("static direct child");
-    directory.create_child(&name).map(|_| ()).map_err(|_| {
-        failure(
-            "unsafe_log_directory",
-            "Cannot create a private runtime log directory.",
-        )
-    })
-}
-
-/// Read-only startup/configuration check: never creates a directory or sink.
 pub fn validate_runtime_log_directory(data_dir: &Path) -> Result<(), ErrorEnvelope> {
     crate::fs_safety::PrivateDirectory::open_existing(data_dir).map_err(|_| {
         failure(
@@ -423,49 +377,6 @@ pub fn validate_runtime_log_directory(data_dir: &Path) -> Result<(), ErrorEnvelo
         })
 }
 
-/// Only an empty private directory (apart from valid common lock files) is a
-/// first-initialization destination. Products still own administrator setup,
-/// current schema creation and the meaning of initialized business state.
-pub fn create_empty_private_directory(data_dir: &Path) -> Result<(), ErrorEnvelope> {
-    let directory = crate::state_file::PrivateStateDirectory::create(data_dir)
-        .map_err(|error| state_error(&error))?;
-    runtime_allowed(data_dir)?;
-    let entries = std::fs::read_dir(directory.path()).map_err(|_| {
-        failure(
-            "unsafe_state_directory",
-            "Cannot inspect the initialization directory.",
-        )
-    })?;
-    for entry in entries {
-        let name = entry
-            .map_err(|_| {
-                failure(
-                    "unsafe_state_directory",
-                    "Cannot inspect an initialization directory entry.",
-                )
-            })?
-            .file_name();
-        if name != INSTANCE_LOCK_FILE && name != MAINTENANCE_LOCK_FILE {
-            return Err(failure(
-                "initialization_conflict",
-                "The initialization directory contains existing or unknown data.",
-            ));
-        }
-        directory.open_existing(&name).map_err(|_| {
-            failure(
-                "unsafe_state_directory",
-                "The initialization directory has an invalid common lock file.",
-            )
-        })?;
-    }
-    directory.verify_identity().map_err(|_| {
-        failure(
-            "unsafe_state_directory",
-            "The initialization directory changed during inspection.",
-        )
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -480,17 +391,12 @@ mod tests {
         let directory = crate::state_file::PrivateStateDirectory::open(private.path()).unwrap();
         let missing = directory.open_existing("SECRET-path").err().unwrap();
         let busy = Error::LockUnavailable {
-            kind: LockKind::Maintenance,
+            kind: LockKind::Instance,
             source: io::Error::new(io::ErrorKind::WouldBlock, "SECRET-owner"),
         };
         for (error, code, retryable) in [
             (missing, "state.not_found", false),
             (busy, "state.lock_busy", true),
-            (
-                Error::MaintenancePending,
-                "state.maintenance_pending",
-                false,
-            ),
             (
                 Error::OpenFile {
                     path: "SECRET-path".into(),
@@ -580,39 +486,17 @@ mod tests {
     }
 
     #[test]
-    fn initialization_does_not_overwrite_unknown_data_or_ignore_pending_maintenance() {
-        let parent = tempfile::tempdir().unwrap();
-        let state = parent.path().join("state");
-        create_empty_private_directory(&state).unwrap();
-        let directory = crate::state_file::PrivateStateDirectory::open(&state).unwrap();
-        let lock = directory.try_instance_lock().unwrap();
-        create_empty_private_directory(&state).unwrap();
-        drop(lock);
-        std::fs::write(state.join("important"), b"original").unwrap();
-        assert_eq!(
-            create_empty_private_directory(&state)
-                .unwrap_err()
-                .code
-                .as_str(),
-            "initialization_conflict"
-        );
-        assert_eq!(std::fs::read(state.join("important")).unwrap(), b"original");
-        std::fs::write(state.join(MAINTENANCE_PENDING_FILE), b"pending").unwrap();
-        assert_eq!(
-            runtime_allowed(&state).unwrap_err().code.as_str(),
-            "state.maintenance_pending"
-        );
-    }
-
-    #[test]
     fn runtime_log_validation_never_creates_or_repairs_a_directory() {
         use std::os::unix::fs::{PermissionsExt, symlink};
         let parent = tempfile::tempdir().unwrap();
         let state = parent.path().join("state");
-        create_empty_private_directory(&state).unwrap();
+        std::fs::create_dir(&state).unwrap();
+        std::fs::set_permissions(&state, std::fs::Permissions::from_mode(0o700)).unwrap();
         assert!(validate_runtime_log_directory(&state).is_err());
         assert!(!state.join("logs").exists());
-        create_runtime_log_directory(&state).unwrap();
+        std::fs::create_dir(state.join("logs")).unwrap();
+        std::fs::set_permissions(state.join("logs"), std::fs::Permissions::from_mode(0o700))
+            .unwrap();
         validate_runtime_log_directory(&state).unwrap();
         std::fs::set_permissions(state.join("logs"), std::fs::Permissions::from_mode(0o755))
             .unwrap();
@@ -627,7 +511,7 @@ mod tests {
         );
         std::fs::remove_dir(state.join("logs")).unwrap();
         symlink(parent.path(), state.join("logs")).unwrap();
-        assert!(create_runtime_log_directory(&state).is_err());
+        assert!(validate_runtime_log_directory(&state).is_err());
         assert!(validate_runtime_log_directory(&state).is_err());
     }
 }

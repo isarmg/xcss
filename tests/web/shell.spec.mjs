@@ -157,7 +157,7 @@ for (const malformed of ["shape", "json", "content-type"]) {
     await expect(page.getByRole("alert")).toContainText("Unable to restore administrator session.");
     await expect(page.getByRole("heading", { name: "Administrator sign in" })).toHaveCount(0);
     recover = true;
-    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await page.getByRole("button", { name: "Try again", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Product overview" })).toBeVisible();
   });
 }

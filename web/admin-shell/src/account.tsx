@@ -2,7 +2,7 @@ import { isAdministratorPassword, type AdministratorApiClient } from "@xcss/web/
 import { Context } from "./context.js";
 import { Button, ErrorState, FormField, IconButton, TextField } from "@xcss/web/admin-ui";
 import { t, validationMessage } from "@xcss/web/admin-ui/i18n";
-import { useContext, useId, useRef, useState, type FormEvent } from "react";
+import { useContext, useId, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 
 type Failure = { message: string; field?: string };
 
@@ -40,11 +40,30 @@ function AccountForm({ client, username, onUpdated }: { client: AdministratorApi
   const [pending, setPending] = useState(false);
   const busy = useRef(false);
   const errorId = useId();
+  const formRef = useRef<HTMLFormElement>(null);
+  const lifecycle = useRef<{ active: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const scope = { active: true };
+    lifecycle.current = scope;
+    const form = formRef.current!;
+    form.reset();
+    (form.elements.namedItem("username") as HTMLInputElement).value = username;
+    busy.current = false;
+    setPending(false);
+    setFailure(null);
+    return () => {
+      scope.active = false;
+      for (const name of ["current_password", "new_password", "confirm_password"]) {
+        (form.elements.namedItem(name) as HTMLInputElement).value = "";
+      }
+    };
+  }, [client, username]);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy.current) return;
     const form = event.currentTarget;
+    const scope = lifecycle.current!;
     function invalid(field: string, message: string) {
       setFailure({ field, message });
       const input = form.elements.namedItem(field);
@@ -76,9 +95,13 @@ function AccountForm({ client, username, onUpdated }: { client: AdministratorApi
       // xcss verifies the current password and updates the account atomically.
       await client.updateAccount({ username: String(data.get("username")), current_password: String(data.get("current_password")),
         ...(password ? { new_password: password } : {}) });
+      // Account updates revoke the session and may already have unmounted this
+      // form. Keep that successful notification, but never notify a replacement.
+      if (lifecycle.current !== scope) return;
       form.reset();
       onUpdated?.();
     } catch (error) {
+      if (!scope.active) return;
       const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
       setFailure(code === "admin.current_password_invalid"
         ? { field: "current_password", message: t("当前密码不正确。", "The current password is incorrect.") }
@@ -90,15 +113,17 @@ function AccountForm({ client, username, onUpdated }: { client: AdministratorApi
       const input = form.elements.namedItem(code === "admin.conflict" ? "username" : "current_password");
       if (input instanceof HTMLInputElement) input.focus();
     } finally {
-      busy.current = false;
-      setPending(false);
+      if (scope.active) {
+        busy.current = false;
+        setPending(false);
+      }
     }
   }
 
   const describedBy = failure ? errorId : undefined;
   return <section className="xcss-content-stack xcss-account-page" aria-label={t("账号设置", "Account settings")}>
     <div className="xcss-content-panel">
-      <form className="xcss-account-form" noValidate onInvalid={event => event.preventDefault()} onInput={() => setFailure(null)}
+      <form ref={formRef} className="xcss-account-form" noValidate onInvalid={event => event.preventDefault()} onInput={() => setFailure(null)}
         onSubmit={event => void submit(event)} aria-busy={pending}>
         <div className="xcss-account-fields">
         <FormField label={t("用户名", "Username")}><TextField name="username" defaultValue={username} autoComplete="username"

@@ -491,3 +491,28 @@ test("budget and header inputs are checked at both boundaries before fetch", asy
   });
   assert.equal(calls, 2);
 });
+
+for (const cancel of [false, true]) {
+  test(`401 still invalidates the session when its body ${cancel ? 'is cancelled' : 'times out'}`, async () => {
+    const caller = new AbortController();
+    let invalidations = 0;
+    await assert.rejects(requestAtOrigin('/api/session', {
+      timeoutMs: 15,
+      signal: caller.signal,
+      fetchImpl: async (_url, init) => {
+        const body = new ReadableStream({ start(controller) {
+          init.signal.addEventListener('abort', () => controller.error(init.signal.reason), { once: true });
+        } });
+        if (cancel) setTimeout(() => caller.abort(), 1);
+        return new Response(body, { status: 401, headers: { 'content-type': 'application/json', 'x-request-id': 'body-interrupted' } });
+      },
+      onUnauthorized: async error => {
+        invalidations++;
+        assert.equal(error.status, 401);
+        assert.equal(error.requestId, 'body-interrupted');
+        throw new Error('Cleanup observers cannot hide the body failure');
+      },
+    }), error => error.code === (cancel ? 'request_aborted' : 'request_timeout'));
+    assert.equal(invalidations, 1);
+  });
+}

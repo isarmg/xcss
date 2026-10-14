@@ -340,7 +340,7 @@ pub fn resolve<T: Serialize + DeserializeOwned>(
 }
 
 /// Validate product-owned field constraints at each source boundary. The hook
-/// checks provided values (for example an address, key or numeric limit); it
+/// checks each complete source layer (including related field constraints); it
 /// must defer absent required inputs and filesystem/dependency checks until
 /// the caller validates the final effective configuration. Errors retain the
 /// actual source even if a later source would override the offending value.
@@ -411,9 +411,15 @@ pub fn resolve_validated<T: Serialize + DeserializeOwned>(
                 segments.last().expect("nonempty pointer").clone(),
                 item.value.clone(),
             );
-            check(effective.clone(), source)?;
+            // Reject structural errors immediately so later entries cannot hide
+            // unknown fields or invalid types. Product constraints are checked
+            // after the complete source, not against a partly applied layer.
+            strict::deserialize::<T>(effective.clone(), source)?;
             remove_sources(&item.path, &mut sources);
             record_sources(&item.value, &item.path, source, &mut sources);
+        }
+        if !overrides.is_empty() {
+            check(effective.clone(), source)?;
         }
     }
     // Every intermediate layer has already been checked. Do not label a final

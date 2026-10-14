@@ -24,13 +24,23 @@ export function useAdministratorSession(
 ): AdministratorSessionController {
   const activeClient = useRef(client);
   const stateGeneration = useRef(0);
+  const logoutSequence = useRef(0);
+  const logoutOutcome = useRef<{ client: AdministratorApiClient; sequence: number; confirmed: boolean; error?: unknown } | null>(null);
   activeClient.current = client;
-  const [state, setState] = useState<AdministratorSessionState>(() => {
+  const [snapshot, setSnapshot] = useState<{ client: AdministratorApiClient; state: AdministratorSessionState }>(() => {
     const session = client.currentSession();
-    return session === null
+    return { client, state: session === null
       ? { phase: "loading", session: null, error: null }
-      : { phase: "authenticated", session, error: null };
+      : { phase: "authenticated", session, error: null } };
   });
+  const setState = useCallback((state: AdministratorSessionState) => {
+    setSnapshot({ client, state });
+  }, [client]);
+  // Effects run after commit. Never render the previous client's authorization
+  // in the intervening render when the application replaces its API context.
+  const state: AdministratorSessionState = snapshot.client === client
+    ? snapshot.state
+    : { phase: "loading", session: null, error: null };
 
   const restore = useCallback(async () => {
     const generation = stateGeneration.current + 1;
@@ -60,15 +70,18 @@ export function useAdministratorSession(
         setState({ phase: "error", session: null, error });
       }
     }
-  }, [client]);
+  }, [client, setState]);
 
   useEffect(() => {
-    const unsubscribe = client.subscribe((session) => {
+    const unsubscribe = client.subscribe((session, error) => {
       if (activeClient.current !== client) return;
       stateGeneration.current += 1;
+      if (session !== null || !error) logoutOutcome.current = null;
       setState(
         session === null
-          ? { phase: "anonymous", session: null, error: null }
+          ? error
+            ? { phase: "error", session: null, error }
+            : { phase: "anonymous", session: null, error: null }
           : { phase: "authenticated", session, error: null },
       );
     });
@@ -77,7 +90,7 @@ export function useAdministratorSession(
       unsubscribe();
       if (activeClient.current === client) stateGeneration.current += 1;
     };
-  }, [client, restore]);
+  }, [client, restore, setState]);
 
   const login = useCallback(async (username: string, password: string) => {
     const generation = stateGeneration.current + 1;
@@ -100,16 +113,25 @@ export function useAdministratorSession(
         const current = client.currentSession();
         setState(
           current === null
-            ? { phase: "anonymous", session: null, error: null }
+            ? logoutOutcome.current?.client === client && !logoutOutcome.current.confirmed
+              ? { phase: "anonymous_logout_unconfirmed", session: null, error: logoutOutcome.current.error }
+              : { phase: "anonymous", session: null, error: null }
             : { phase: "authenticated", session: current, error: null },
         );
       }
       throw error;
     }
-  }, [client]);
+  }, [client, setState]);
 
   const logout = useCallback(async () => {
     stateGeneration.current += 1;
+    const sequence = ++logoutSequence.current;
+    const recordOutcome = (confirmed: boolean, error?: unknown) => {
+      const previous = logoutOutcome.current;
+      if (activeClient.current === client && (previous === null || previous.client !== client || previous.sequence <= sequence)) {
+        logoutOutcome.current = { client, sequence, confirmed, error };
+      }
+    };
     // logout synchronously publishes null; capture after that notification so
     // our own subscription does not make the operation's result stale.
     const pending = client.logout();
@@ -117,8 +139,12 @@ export function useAdministratorSession(
     let failed = false;
     try {
       await pending;
+      // Keep the operation result even if a queued login owns the UI now.
+      // Sequence ordering prevents a delayed result replacing a newer outcome.
+      recordOutcome(true);
     } catch (error) {
       failed = true;
+      if (client.currentSession() === null) recordOutcome(false, error);
       if (activeClient.current === client && stateGeneration.current === generation && client.currentSession() === null) {
         setState({ phase: "anonymous_logout_unconfirmed", session: null, error });
       }
@@ -137,7 +163,7 @@ export function useAdministratorSession(
         );
       }
     }
-  }, [client]);
+  }, [client, setState]);
 
   return { ...state, login, logout, restore };
 }

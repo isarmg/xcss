@@ -17,7 +17,7 @@ xcss 的产品接入由 `xcss-product.toml` 声明。产品的业务配置字段
 
 ## 产品配置优先级
 
-`xcss::config::resolve` 按“默认值 → JSON 文件 → 明确映射的环境变量 → 显式命令行覆盖”组合配置，后者优先。每层先按产品 Serde 类型校验；`resolve_validated` 可在各层检查字段的内在约束，最终配置再验证必需凭据和外部路径等运行前提。
+`xcss::config::resolve` 按“默认值 → JSON 文件 → 明确映射的环境变量 → 显式命令行覆盖”组合配置，后者优先。每层先按产品 Serde 类型校验；`resolve_validated` 在每个完整来源层检查字段的内在约束与跨字段关系，环境变量或命令行中不同字段的同层覆盖，其排列顺序不影响跨字段语义校验，最终配置再验证必需凭据和外部路径等运行前提。
 
 `Loaded.sources` 记录每个有效叶字段的来源。文件与环境 JSON 各最多 1 MiB，覆盖项最多 256，数组整体替换。完整错误语义见[配置、CLI 与日志参考](configuration-cli-logging.md)。
 

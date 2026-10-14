@@ -14,7 +14,8 @@ export { isAdministratorPassword, ADMINISTRATOR_PASSWORD_MIN_BYTES, ADMINISTRATO
 
 
 export type JsonGuard<T> = (value: unknown) => value is T;
-export type AdministratorSessionListener = (session: AdministratorSession | null) => void;
+/** A failed-closed restore can revoke local authorization without implying sign-out. */
+export type AdministratorSessionListener = (session: AdministratorSession | null, error?: ApiClientError) => void;
 
 export type AdministratorApiClientOptions = {
   baseUrl?: string | URL;
@@ -59,21 +60,21 @@ export function createAdministratorApiClient(
   // response cannot resurrect or overwrite newer authentication state.
   let authenticationGeneration = 0;
 
-  const publish = (next: AdministratorSession | null) => {
+  const publish = (next: AdministratorSession | null, error?: ApiClientError) => {
     session = next;
     for (const listener of listeners) {
       try {
-        listener(next);
+        listener(next, error);
       } catch (error) {
         try { options.onSubscriberError?.(error); } catch { /* observers stay isolated */ }
       }
     }
   };
 
-  const invalidate = () => {
+  const invalidate = (error?: ApiClientError) => {
     authenticationGeneration += 1;
     transportSession = null;
-    publish(null);
+    publish(null, error);
   };
 
   const requireCurrentOperation = (generation: number) => {
@@ -122,7 +123,9 @@ export function createAdministratorApiClient(
         : { csrfToken: authenticationContext.csrfToken }),
       onUnauthorized: async () => {
         // Logout handles invalid-session confirmation without publishing again.
-        if (path === ADMIN_AUTH_PATHS.logout) return;
+        // A rejected login authenticates credentials, not the existing cookie:
+        // it cannot confirm revocation of an earlier failed logout target.
+        if (path === ADMIN_AUTH_PATHS.logout || path === ADMIN_AUTH_PATHS.login) return;
         // A request from an older session must not erase a newer login.
         if (
           authenticationContext.generation !== authenticationGeneration ||
@@ -207,7 +210,7 @@ export function createAdministratorApiClient(
             error instanceof ApiClientError &&
             isInvalidSessionResponse(error.code)
           ) {
-            invalidate();
+            invalidate(error);
           }
           throw error;
         })

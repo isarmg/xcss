@@ -313,3 +313,75 @@ test("logout accepts only invalid-session confirmation and preserves CSRF failur
     assert.equal(client.currentSession(), null);
   }
 });
+
+for (const [code, response] of [
+  ["invalid_response_shape", () => json({ authenticated: true })],
+  ["invalid_json_response", () => new Response("{", { headers: { "content-type": "application/json" } })],
+  ["invalid_content_type", () => new Response("<html>upstream failure</html>", { headers: { "content-type": "text/html" } })],
+  ["response_too_large", () => new Response("{}", { headers: { "content-type": "application/json", "content-length": "3000000" } })],
+]) {
+  test(`restore subscribers preserve ${code} instead of reporting ordinary sign-out`, async () => {
+    let valid = true;
+    const client = createAdministratorApiClient({ baseUrl: BASE_URL, fetchImpl: async () => valid ? json(SESSION) : response() });
+    const notifications = [];
+    client.subscribe((session, error) => notifications.push({ session, error }));
+    await client.restore();
+    valid = false;
+    await assert.rejects(client.restore(), error => {
+      const last = notifications.at(-1);
+      assert.equal(last.session, null);
+      assert.equal(last.error, error);
+      return error.code === code;
+    });
+    assert.equal(client.currentSession(), null);
+    valid = true;
+    await client.restore();
+    assert.deepEqual(notifications.at(-1), { session: SESSION, error: undefined });
+  });
+}
+
+for (const replacement of ["none", "login", "restore"]) {
+  test(`cancelled 401 body ${replacement === "none" ? "revokes the affected local session" : `preserves a newer ${replacement}`}`, async () => {
+    const controller = new AbortController();
+    let receivedHeaders;
+    const headersReady = new Promise(resolve => { receivedHeaders = resolve; });
+    const newer = { ...SESSION, csrf_token: TOKEN_B };
+    const client = createAdministratorApiClient({ baseUrl: BASE_URL, fetchImpl: async (url, init) => {
+      if (String(url).endsWith('/session')) return json(SESSION);
+      if (String(url).endsWith('/login')) return json(newer);
+      const response = new Response(new ReadableStream({ start(body) {
+        init.signal.addEventListener('abort', () => body.error(init.signal.reason), { once: true });
+      } }), { status: 401, headers: { 'content-type': 'application/json' } });
+      receivedHeaders();
+      return response;
+    } });
+    await client.restore();
+    const pending = client.request('/api/v1/private', () => true, { signal: controller.signal });
+    await headersReady;
+    if (replacement === "login") await client.login('admin', 'correct horse battery staple');
+    if (replacement === "restore") await client.restore();
+    const expected = replacement === "none" ? null : client.currentSession();
+    controller.abort();
+    await assert.rejects(pending, error => error.code === 'request_aborted');
+    assert.equal(client.currentSession(), expected);
+  });
+}
+
+test('failed login does not discard an unconfirmed logout target', async () => {
+  const tokens = [];
+  let logoutAttempts = 0;
+  const client = createAdministratorApiClient({ baseUrl: BASE_URL, fetchImpl: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path.endsWith('/session')) return json(SESSION);
+    if (path.endsWith('/login')) return json({ code: 'auth.invalid_credentials', message: 'Sign in failed', retryable: false }, 401);
+    tokens.push(new Headers(init.headers).get('x-csrf-token'));
+    if (++logoutAttempts === 1) throw new TypeError('Offline');
+    return new Response(null, { status: 204 });
+  } });
+  await client.restore();
+  await assert.rejects(client.logout(), error => error.code === 'network_error');
+  await assert.rejects(client.login('admin', 'incorrect password'), error => error.status === 401);
+  assert.equal(client.currentSession(), null);
+  await client.logout();
+  assert.deepEqual(tokens, [TOKEN_A, TOKEN_A]);
+});

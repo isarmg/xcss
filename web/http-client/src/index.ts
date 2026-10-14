@@ -131,12 +131,23 @@ export async function requestJson<T>(
 
     const requestId = safeRequestId(response.headers.get("x-request-id"));
     if (!response.ok) {
-      const error = await responseError(response, requestId, controller.signal);
-      if (response.status === 401 && onUnauthorized) {
-        try {
-          await onUnauthorized(error);
-        } catch {
-          // Session cleanup must not replace the authoritative API error.
+      // A received 401 remains authoritative even if reading its error body
+      // is later interrupted. Never retain authorization because parsing failed.
+      let error = new ApiClientError({
+        status: response.status,
+        code: "invalid_error_response",
+        message: "Server returned an invalid error response",
+        requestId,
+      });
+      try {
+        error = await responseError(response, requestId, controller.signal);
+      } finally {
+        if (response.status === 401 && onUnauthorized) {
+          try {
+            await onUnauthorized(error);
+          } catch {
+            // Session cleanup must not replace the authoritative API error.
+          }
         }
       }
       throw error;

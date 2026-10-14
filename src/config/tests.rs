@@ -645,3 +645,62 @@ fn deny_unknown_fields_reports_each_key_once() {
         );
     }
 }
+
+#[test]
+fn cross_field_constraints_are_checked_for_the_complete_override_source() {
+    #[derive(Serialize, Deserialize)]
+    struct QueueConfig {
+        queue_capacity: usize,
+        batch_size: usize,
+    }
+    let defaults = QueueConfig {
+        queue_capacity: 256,
+        batch_size: 64,
+    };
+    let validate = |value: &QueueConfig, source| {
+        if value.batch_size > value.queue_capacity {
+            Err(ConfigError::new(
+                Reason::InvalidValue,
+                "/batch_size",
+                source,
+            ))
+        } else {
+            Ok(())
+        }
+    };
+    for overrides in [
+        vec![
+            Override::new("/queue_capacity", 32),
+            Override::new("/batch_size", 16),
+        ],
+        vec![
+            Override::new("/batch_size", 16),
+            Override::new("/queue_capacity", 32),
+        ],
+    ] {
+        for (environment, command_line, source) in [
+            (overrides.as_slice(), &[][..], ConfigSource::Environment),
+            (&[][..], overrides.as_slice(), ConfigSource::CommandLine),
+        ] {
+            let loaded = resolve_validated(&defaults, None, environment, command_line, validate)
+                .expect("a valid complete source must not depend on field application order");
+            assert_eq!(loaded.value.queue_capacity, 32);
+            assert_eq!(loaded.value.batch_size, 16);
+            assert_eq!(loaded.sources["/queue_capacity"], source);
+            assert_eq!(loaded.sources["/batch_size"], source);
+        }
+    }
+    let error = resolve_validated(
+        &defaults,
+        None,
+        &[Override::new("/queue_capacity", 32)],
+        &[Override::new("/batch_size", 16)],
+        validate,
+    )
+    .err()
+    .unwrap();
+    assert_eq!(
+        (error.reason, error.source),
+        (Reason::InvalidValue, ConfigSource::Environment)
+    );
+}

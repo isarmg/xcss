@@ -146,3 +146,82 @@ test("failed logout closes protected UI and retries revocation without restoring
   await expect(page.getByRole("heading", { name: "Administrator sign in" })).toBeVisible();
   expect(attempts).toBe(2);
 });
+
+for (const malformed of ["shape", "json", "content-type"]) {
+  test(`malformed ${malformed} session restore displays a retryable failure`, async ({ page }) => {
+    let recover = false;
+    await page.route("**/api/v1/auth/session", route => route.fulfill(recover
+      ? { json: session }
+      : { contentType: malformed === "content-type" ? "text/html" : "application/json", body: malformed === "json" ? "{" : "{}" }));
+    await page.goto("/");
+    await expect(page.getByRole("alert")).toContainText("Unable to restore administrator session.");
+    await expect(page.getByRole("heading", { name: "Administrator sign in" })).toHaveCount(0);
+    recover = true;
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Product overview" })).toBeVisible();
+  });
+}
+
+test('a failed login preserves the unconfirmed sign-out warning and retry token', async ({ page }) => {
+  await mockApi(page, true);
+  let logouts = 0;
+  await page.route('**/api/v1/auth/logout', route => {
+    expect(route.request().headers()['x-csrf-token']).toBe(session.csrf_token);
+    return ++logouts === 1 ? route.abort('failed') : route.fulfill({ status: 204 });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Retry sign out' })).toBeVisible();
+  await page.getByLabel('Username', { exact: true }).fill('admin');
+  await page.getByLabel('Password', { exact: true }).fill('wrong-password');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByText('Sign in failed. Check your credentials and try again.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry sign out' })).toBeVisible();
+  await page.getByRole('button', { name: 'Retry sign out' }).click();
+  await expect(page.getByRole('button', { name: 'Retry sign out' })).toHaveCount(0);
+  expect(logouts).toBe(2);
+});
+
+test('a confirmed sign-out clears its warning when a queued login fails', async ({ page }) => {
+  await mockApi(page, true);
+  let logouts = 0, releaseLogout;
+  await page.route('**/api/v1/auth/logout', async route => {
+    if (++logouts === 1) return route.abort('failed');
+    await new Promise(resolve => { releaseLogout = resolve; });
+    return route.fulfill({ status: 204 });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.getByRole('button', { name: 'Retry sign out' }).click();
+  await expect.poll(() => typeof releaseLogout).toBe('function');
+  await page.getByLabel('Username', { exact: true }).fill('admin');
+  await page.getByLabel('Password', { exact: true }).fill('wrong-password');
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  releaseLogout();
+  await expect(page.getByText('Sign in failed. Check your credentials and try again.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Retry sign out' })).toHaveCount(0);
+  expect(logouts).toBe(2);
+});
+
+for (const retry of [false, true]) {
+  test(`a failed ${retry ? 'retried' : 'initial'} sign-out remains unconfirmed after a queued login fails`, async ({ page }) => {
+    await mockApi(page, true);
+    let logouts = 0, releaseLogout;
+    await page.route('**/api/v1/auth/logout', async route => {
+      expect(route.request().headers()['x-csrf-token']).toBe(session.csrf_token);
+      if (retry && ++logouts === 1) return route.abort('failed');
+      await new Promise(resolve => { releaseLogout = resolve; });
+      return route.abort('failed');
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    if (retry) await page.getByRole('button', { name: 'Retry sign out' }).click();
+    await expect.poll(() => typeof releaseLogout).toBe('function');
+    await page.getByLabel('Username', { exact: true }).fill('admin');
+    await page.getByLabel('Password', { exact: true }).fill('wrong-password');
+    await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+    releaseLogout();
+    await expect(page.getByText('Sign in failed. Check your credentials and try again.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Retry sign out' })).toBeVisible();
+  });
+}

@@ -40,18 +40,68 @@ pub struct SecureHttpClient {
 #[cfg(test)]
 mod tls_tests {
     use super::*;
-    use std::sync::Arc;
+    use std::{os::unix::fs::OpenOptionsExt, process::Stdio, sync::Arc};
     use tokio_rustls::{TlsAcceptor, rustls};
 
     #[tokio::test]
     async fn untrusted_certificate_is_refused_before_application_bytes() {
-        // Public test-only key/certificate, generated independently and never
-        // installed in any platform trust store. SAN includes the tested host.
+        // Every run has a new untrusted keypair in a private temporary directory.
+        // No private key or reusable certificate is stored in the source tree.
+        let directory = tempfile::tempdir().unwrap();
+        for name in ["key.pem", "key.der", "cert.der"] {
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(directory.path().join(name))
+                .unwrap();
+        }
+        for arguments in [
+            vec![
+                "req",
+                "-x509",
+                "-newkey",
+                "ec",
+                "-pkeyopt",
+                "ec_paramgen_curve:P-256",
+                "-nodes",
+                "-sha256",
+                "-days",
+                "1",
+                "-subj",
+                "/CN=127.0.0.1",
+                "-addext",
+                "subjectAltName=IP:127.0.0.1",
+                "-keyout",
+                "key.pem",
+                "-outform",
+                "DER",
+                "-out",
+                "cert.der",
+            ],
+            vec![
+                "pkcs8", "-topk8", "-nocrypt", "-in", "key.pem", "-outform", "DER", "-out",
+                "key.der",
+            ],
+        ] {
+            assert!(
+                std::process::Command::new("openssl")
+                    .args(arguments)
+                    .current_dir(directory.path())
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status()
+                    .expect("OpenSSL is required for the real TLS rejection test")
+                    .success(),
+                "temporary TLS fixture generation failed"
+            );
+        }
         let certificate = rustls::pki_types::CertificateDer::from(
-            include_bytes!("fixtures/untrusted-cert.der").to_vec(),
+            std::fs::read(directory.path().join("cert.der")).unwrap(),
         );
         let key = rustls::pki_types::PrivatePkcs8KeyDer::from(
-            include_bytes!("fixtures/untrusted-key.der").to_vec(),
+            std::fs::read(directory.path().join("key.der")).unwrap(),
         );
         let config = rustls::ServerConfig::builder()
             .with_no_client_auth()

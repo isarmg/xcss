@@ -1,6 +1,6 @@
 # 构建与测试
 
-开发环境为 Linux x86_64 GNU、Rust `1.99.0`、Node `26.7.0`、pnpm `10.34.6`、Python 3 和 C 编译工具链。工具版本来自 `rust-toolchain.toml`、`.node-version` 和 `package.json`。
+开发环境为 Linux x86_64 GNU、Rust `1.99.0`、Node `26.7.0`、pnpm `10.34.6`、Python 3、OpenSSL 命令行和 C 编译工具链。工具版本来自 `rust-toolchain.toml`、`.node-version` 和 `package.json`。
 
 ## 准备和构建
 

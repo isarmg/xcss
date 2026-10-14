@@ -22,7 +22,7 @@ pub const MASTER_KEY_BYTES: usize = 32;
 pub const CURRENT_ENVELOPE_VALIDATION_VECTORS_JSON: &str =
     include_str!("fixtures/current-envelope-v1.json");
 
-/// Build-time current-format data for a product's signed maintenance material.
+/// Build-time current-format data for a product's maintenance material.
 /// Product domain/revision and stable object-binding rules are supplied by the
 /// product; this export performs no installation or credential-file writes.
 pub fn envelope_contract() -> serde_json::Value {

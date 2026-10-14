@@ -32,9 +32,9 @@ class ReleaseAssetTests(unittest.TestCase):
         self.assertEqual(package_version, MODULE.CURRENT_VERSION)
         self.assertEqual(release_version, MODULE.CURRENT_VERSION)
 
-    def test_previous_tag_is_rejected_before_source_inspection(self) -> None:
+    def test_noncurrent_tag_is_rejected_before_source_inspection(self) -> None:
         with self.assertRaisesRegex(MODULE.ReleaseBuildError, "tag must be exactly"):
-            MODULE.verify_source("a" * 40, "v1.0.0")
+            MODULE.verify_source("a" * 40, "v0.9.0")
 
     def test_state_contract_has_one_current_exact_shape(self) -> None:
         revision = "a" * 40

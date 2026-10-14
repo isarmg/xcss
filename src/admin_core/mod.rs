@@ -17,7 +17,7 @@ use std::{
 use thiserror::Error;
 use tokio::sync::Semaphore;
 
-pub const POLICY_REVISION: u32 = 2;
+pub const POLICY_REVISION: u32 = 1;
 pub const SESSION_IDLE_MICROS: u64 = 30 * 60 * 1_000_000;
 pub const SESSION_ABSOLUTE_MICROS: u64 = 12 * 60 * 60 * 1_000_000;
 pub const SESSIONS_PER_ADMINISTRATOR: usize = 32;

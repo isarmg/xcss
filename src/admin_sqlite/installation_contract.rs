@@ -6,7 +6,7 @@ use super::{
 };
 use crate::{admin_auth, admin_core, schema_identity};
 
-/// Generate authoritative public data for a product's signed installation
+/// Generate authoritative public data for a product's installation
 /// contract. The product adds its own identity, DDL and business validation.
 pub fn installation_contract() -> Result<serde_json::Value, admin_auth::Error> {
     Ok(serde_json::json!({

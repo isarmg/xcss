@@ -145,3 +145,24 @@ jobs:
         run: pnpm test:web:built
       - name: Verify the publishable tarball from a clean build
         run: python3 scripts/package-artifacts.py smoke
+
+  browser_rust:
+    name: Portable Leptos browser library
+    needs: scope
+    if: ${{ !cancelled() && needs.scope.outputs.run_full != 'false' }}
+    permissions:
+      contents: read
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install exact browser Rust toolchain
+        run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
+      - name: Check portable browser source and contracts
+        run: |
+          cargo +1.99.0 fmt --manifest-path web/leptos/Cargo.toml -- --check
+          cargo +1.99.0 clippy --manifest-path web/leptos/Cargo.toml --target wasm32-unknown-unknown --locked -- -D warnings
+          cargo +1.99.0 test --manifest-path web/leptos/Cargo.toml --locked
+          python3 -I -B scripts/test-leptos-build.py

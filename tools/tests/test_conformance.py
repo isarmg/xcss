@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import subprocess
@@ -137,6 +138,37 @@ class ConformanceTests(unittest.TestCase):
         pattern = schema["properties"]["foundation"]["properties"]["version"]["pattern"]
         self.assertIsNotNone(re.fullmatch(pattern, "1.0.0"))
         self.assertIsNone(re.fullmatch(pattern, "1x0x0"))
+
+    def test_web_resource_version_is_independent_but_its_archive_binding_is_strict(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            product = Path(directory)
+            self.embedded_fixture(product)
+            package_path = product / "web/package.json"
+            url = "https://github.com/isarmg/xcss/releases/download/web-v2.0.0/xcss-web-2.0.0.tgz"
+            package = json.loads(package_path.read_text())
+            package["devDependencies"] = {"@xcss/web": url}
+            package_path.write_text(json.dumps(package))
+            locked = {
+                "version": "2.0.0",
+                "resolved": url,
+                "integrity": "sha512-" + base64.b64encode(b"fixture digest".ljust(64, b".")).decode(),
+            }
+            lock_path = product / "web/package-lock.json"
+            for mutation in ({}, {"version": "1.0.0"}, {"resolved": "https://example.com/web.tgz"},
+                             {"integrity": "sha512-YQ=="}, {"link": True}):
+                lock_path.write_text(json.dumps({"packages": {"node_modules/@xcss/web": locked | mutation}}))
+                for check in (verify_source, verify_web):
+                    with self.subTest(mutation=mutation, check=check.__name__):
+                        if mutation:
+                            with self.assertRaisesRegex(ConformanceError, "locked.*SHA-512"):
+                                check(product, ROOT)
+                        else:
+                            check(product, ROOT)
+            package["devDependencies"]["@xcss/web"] = url.replace("web-v2.0.0/", "web-v2.0.1/")
+            package_path.write_text(json.dumps(package))
+            for check in (verify_source, verify_web):
+                with self.assertRaisesRegex(ConformanceError, "immutable official"):
+                    check(product, ROOT)
 
     def test_repository_platform_definition_is_self_consistent(self) -> None:
         result = verify_foundation(ROOT)

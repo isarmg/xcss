@@ -13,7 +13,7 @@ xcss 的产品接入由 `xcss-product.toml` 声明。产品的业务配置字段
 
 完整组合、必需/可选能力和平台常量见 [profiles](../profiles/)；清单字段见 [JSON Schema](../schemas/xcss-product.schema.json)。带管理 Web 的服务端声明 `embedded-web` 并提供 `xcss-web-build.json`。
 
-`foundation.version` 和 `foundation.git_rev` 与 Cargo/npm 输入保持一致。管理员会话时限、Argon2 参数、Cookie 和编译目标来自选定 profile 的公共策略，产品清单只选择支持的组合。
+`foundation.version` 和 `foundation.git_rev` 与原生 Cargo 输入保持一致。Web 资源按自身的不可变官方归档版本与锁文件 SHA-512 完整性摘要校验，不为原生库与资源包数字一致而改号。管理员会话时限、Argon2 参数、Cookie 和编译目标来自选定 profile 的公共策略，产品清单只选择支持的组合。
 
 ## 产品配置优先级
 

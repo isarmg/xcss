@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import json
 import re
 import stat
@@ -21,7 +23,7 @@ FOUNDATION_ROUTES = ("/api/v1/auth/", "/api/v1/platform/", "/healthz", "/readyz"
 FOUNDATION_GIT_URL = "https://github.com/isarmg/xcss.git"
 FOUNDATION_RELEASE_URL = re.compile(
     r"https://github\.com/isarmg/xcss/releases/download/"
-    r"v([^/]+)/xcss-([a-z0-9-]+)-([^/]+)\.tgz"
+    r"(?:web-)?v([^/]+)/xcss-([a-z0-9-]+)-([^/]+)\.tgz"
 )
 
 
@@ -411,11 +413,31 @@ def _verify_cargo_lock(
             )
 
 
-def _verify_npm_lock(
-    package_path: Path,
-    requirements: dict[str, str],
-    expected_version: str,
-) -> None:
+def _web_asset_version(dependency: str, requirement: str) -> str:
+    match = FOUNDATION_RELEASE_URL.fullmatch(requirement)
+    if (
+        match is None
+        or dependency != "@xcss/web"
+        or match[2] != "web"
+        or match[1] != match[3]
+        or SEMVER.fullmatch(match[1]) is None
+    ):
+        raise ConformanceError(
+            f"{dependency} must use its immutable official xcss Web release asset"
+        )
+    return match[1]
+
+
+def _sha512_integrity(value: Any) -> bool:
+    if not isinstance(value, str) or not value.startswith("sha512-"):
+        return False
+    try:
+        return len(base64.b64decode(value.removeprefix("sha512-"), validate=True)) == 64
+    except (ValueError, binascii.Error):
+        return False
+
+
+def _verify_npm_lock(package_path: Path, requirements: dict[str, str]) -> None:
     if not requirements:
         return
     lock_path = package_path.parent / "package-lock.json"
@@ -425,13 +447,14 @@ def _verify_npm_lock(
     if not isinstance(packages, dict):
         raise ConformanceError(f"{lock_path}: invalid packages object")
     for dependency, requirement in sorted(requirements.items()):
+        expected_version = _web_asset_version(dependency, requirement)
         locked = packages.get(f"node_modules/{dependency}")
         if (
             not isinstance(locked, dict)
+            or locked.get("link", False) is not False
             or locked.get("version") != expected_version
             or locked.get("resolved") != requirement
-            or not isinstance(locked.get("integrity"), str)
-            or not locked["integrity"].startswith("sha512-")
+            or not _sha512_integrity(locked.get("integrity"))
         ):
             raise ConformanceError(
                 f"{lock_path}: {dependency} is not locked to the declared xcss asset with SHA-512 integrity"
@@ -587,16 +610,11 @@ def verify_source(product_root: Path, foundation_root: Path) -> dict[str, Any]:
                 if not isinstance(requirement, str):
                     findings.append(("immutable-foundation-dependencies", f"{path}: {dependency} must use one immutable release asset URL"))
                     continue
-                match = FOUNDATION_RELEASE_URL.fullmatch(requirement)
-                expected_slug = dependency.removeprefix("@xcss/")
-                if match is None or match.groups() != (
-                    expected_version,
-                    expected_slug,
-                    expected_version,
-                ):
-                    findings.append(("immutable-foundation-dependencies", f"{path}: {dependency} must use its v{expected_version} xcss release asset"))
+                try:
+                    _web_asset_version(dependency, requirement)
+                except ConformanceError as error:
+                    findings.append(("immutable-foundation-dependencies", f"{path}: {error}"))
                     continue
-                observed_versions.add(expected_version)
                 observed_web_requirements.setdefault(path, {})[dependency] = requirement
     if observed_versions and observed_versions != {expected_version}:
         findings.append(("single-foundation-release", f"observed xcss versions {sorted(observed_versions)} differ from manifest {expected_version}"))
@@ -610,7 +628,7 @@ def verify_source(product_root: Path, foundation_root: Path) -> dict[str, Any]:
             expected_revision,
         )
         for package_path, requirements in observed_web_requirements.items():
-            _verify_npm_lock(package_path, requirements, expected_version)
+            _verify_npm_lock(package_path, requirements)
     except ConformanceError as error:
         findings.append(("immutable-foundation-dependencies", str(error)))
     # Text searches are useful migration hints, but cannot prove ownership: comments,
@@ -689,7 +707,6 @@ def verify_web(product_root: Path, foundation_root: Path) -> dict[str, Any]:
     if package_path is None or not package_path.is_file():
         raise ConformanceError(f"{package_path}: Web Profile requires a package manifest")
     package = _json(package_path)
-    expected_version = manifest["foundation"]["version"]
     foundation_packages = _xcss_package_names(foundation_root)
     requirements: dict[str, str] = {}
     for section in ("dependencies", "devDependencies", "optionalDependencies"):
@@ -702,18 +719,9 @@ def verify_web(product_root: Path, foundation_root: Path) -> dict[str, Any]:
                     continue
                 if not isinstance(requirement, str):
                     raise ConformanceError(f"{package_path}: invalid xcss dependency {dependency}")
-                match = FOUNDATION_RELEASE_URL.fullmatch(requirement)
-                expected_slug = dependency.removeprefix("@xcss/")
-                if match is None or match.groups() != (
-                    expected_version,
-                    expected_slug,
-                    expected_version,
-                ):
-                    raise ConformanceError(
-                        f"{package_path}: {dependency} must use its v{expected_version} xcss release asset"
-                    )
+                _web_asset_version(dependency, requirement)
                 requirements[dependency] = requirement
-    _verify_npm_lock(package_path, requirements, expected_version)
+    _verify_npm_lock(package_path, requirements)
     result = {"product": manifest["product_id"], "profiles": expected}
     if embedded_build is not None:
         result["build"] = embedded_build

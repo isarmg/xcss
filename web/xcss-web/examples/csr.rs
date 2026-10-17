@@ -172,3 +172,12 @@ fn request_probe() -> impl IntoView {
 }
 
 fn main() {}
+
+// Exercise the public restore API even while the protected workspace is absent.
+#[wasm_bindgen]
+pub async fn restore_session() -> String {
+    match api::restore().await {
+        Ok(_) => "authenticated".into(),
+        Err(error) => error.code,
+    }
+}

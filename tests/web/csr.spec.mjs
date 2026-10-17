@@ -274,3 +274,30 @@ for (const view of ["login", "workspace", "account"]) for (const colorScheme of 
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations).toEqual([]);
 });
+
+
+test("restore cannot reopen protected content during pending or unconfirmed logout", async ({ page }) => {
+  const pending = gate(); let reads = 0, logoutCalls = 0;
+  await page.route("**/api/v1/auth/session", route => { reads++; return json(route, session()); });
+  await page.route("**/api/v1/auth/logout", async route => {
+    logoutCalls++;
+    if (logoutCalls === 1) { await pending.pending; await json(route, failure("server.unavailable"), 503); }
+    else await route.fulfill({ status: 204 });
+  });
+  await page.goto("/?lang=en"); await ready(page);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect.poll(() => logoutCalls).toBe(1);
+  const restore = () => page.evaluate(async () => (await import("/pkg/csr_fixture.js")).restore_session());
+  expect(await restore()).toBe("auth_logout_unconfirmed");
+  await expect(page.locator("main")).toHaveCount(0);
+  pending.release();
+  await expect(page.getByRole("button", { name: "Retry sign out" })).toBeVisible();
+  expect(await restore()).toBe("auth_logout_unconfirmed");
+  expect(reads).toBe(1);
+  await expect(page.getByRole("button", { name: "Retry sign out" })).toBeVisible();
+  await page.getByRole("button", { name: "Retry sign out" }).click();
+  await expect(page.getByRole("button", { name: "Retry sign out" })).toHaveCount(0);
+  await page.route("**/api/v1/auth/session", route => json(route, failure(), 401));
+  expect(await restore()).toBe("auth.session_required");
+  await expect(page.locator("main")).toHaveCount(0);
+});

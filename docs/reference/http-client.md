@@ -14,7 +14,7 @@
 
 `login`、`restore`、`logout` 与 `update_account` 共享内存会话，修改操作通过互斥锁串行，generation 阻止过期回复发布授权。并发 restore 复用同一 future。`snapshot` 提供 Loading、Anonymous、Authenticated、LogoutUnconfirmed 与 Error；`AUTH_CHANGE_EVENT` 通知共享 UI 更新。
 
-退出立即终止本地授权。服务端撤销未确认时保留撤销所需内存 token 和明确的主动重试入口；确认注销或明确会话失效后清除。刷新页面通过 HttpOnly Cookie 恢复，前端不把 token/会话写入 localStorage、sessionStorage 或 IndexedDB。
+退出立即终止本地授权。退出进行中或撤销未确认时，`restore` 返回 `auth_logout_unconfirmed`，不会读取仍有效的 Cookie 或重新打开受保护内容；只有明确登录成功或确认退出后才解除此限制。服务端撤销未确认时保留撤销所需内存 token 和明确的主动重试入口；确认注销或明确会话失效后清除。刷新页面通过 HttpOnly Cookie 恢复，前端不把 token/会话写入 localStorage、sessionStorage 或 IndexedDB。
 
 ## 验证
 

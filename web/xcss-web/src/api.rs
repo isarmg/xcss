@@ -108,10 +108,11 @@ struct State {
     phase: AuthPhase,
     error: Option<ApiError>,
     account_updated: bool,
+    revoking: bool,
     restore: Option<(u64, Restore)>,
 }
 thread_local! {
-    static STATE: RefCell<State> = const { RefCell::new(State { session: None, transport: None, generation: 0, phase: AuthPhase::Loading, error: None, account_updated: false, restore: None }) };
+    static STATE: RefCell<State> = const { RefCell::new(State { session: None, transport: None, generation: 0, phase: AuthPhase::Loading, error: None, account_updated: false, revoking: false, restore: None }) };
     static MUTATIONS: Rc<Mutex<()>> = Rc::new(Mutex::new(()));
 }
 pub fn current_session() -> Option<AdministratorSession> {
@@ -186,6 +187,7 @@ fn publish(
         s.phase = AuthPhase::Authenticated;
         s.error = None;
         s.account_updated = false;
+        s.revoking = false;
     });
     changed();
     Ok(session)
@@ -638,6 +640,12 @@ pub async fn login(username: &str, password: &str) -> Result<AdministratorSessio
 }
 
 pub async fn restore() -> Result<AdministratorSession, ApiError> {
+    // A cookie may still be valid while logout is pending or failed. Restoring it
+    // would undo the user's local sign-out and discard the revocation warning.
+    // Only an explicit successful login or confirmed logout ends this barrier.
+    if STATE.with(|s| s.borrow().revoking) {
+        return Err(ApiError::local("auth_logout_unconfirmed"));
+    }
     let (generation, pending) = STATE.with(|s| {
         let mut s = s.borrow_mut();
         if let Some((generation, pending)) = &s.restore {
@@ -687,6 +695,7 @@ pub async fn restore() -> Result<AdministratorSession, ApiError> {
 }
 
 pub async fn logout() -> Result<(), ApiError> {
+    STATE.with(|s| s.borrow_mut().revoking = true);
     let generation = begin_mutation();
     let mutex = MUTATIONS.with(Clone::clone);
     let _guard = mutex.lock().await;
@@ -726,6 +735,7 @@ pub async fn logout() -> Result<(), ApiError> {
     STATE.with(|s| {
         let mut s = s.borrow_mut();
         s.transport = None;
+        s.revoking = false;
         s.phase = AuthPhase::Anonymous;
         s.error = None;
     });
@@ -776,6 +786,30 @@ pub async fn update_account(input: Value) -> Result<(), ApiError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn restore_does_not_touch_the_browser_during_revocation() {
+        for phase in [AuthPhase::Anonymous, AuthPhase::LogoutUnconfirmed] {
+            STATE.with(|state| {
+                let mut state = state.borrow_mut();
+                state.revoking = true;
+                state.phase = phase.clone();
+            });
+            let error = futures::executor::block_on(restore()).unwrap_err();
+            assert_eq!(error.code, "auth_logout_unconfirmed");
+            STATE.with(|state| {
+                let state = state.borrow();
+                assert!(state.revoking);
+                assert!(state.phase == phase);
+                assert!(state.restore.is_none());
+            });
+        }
+        STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            state.revoking = false;
+            state.phase = AuthPhase::Loading;
+        });
+    }
+
     #[test]
     fn typed_decode_preserves_large_integers_and_null_contracts() {
         #[derive(Deserialize, Debug, PartialEq)]

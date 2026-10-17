@@ -160,6 +160,14 @@ jobs:
           persist-credentials: false
       - name: Install exact browser Rust toolchain
         run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
+      - name: Verify native asset tooling and Rust view syntax
+        run: |
+          cargo +1.99.0 fmt --manifest-path tools/web-build/Cargo.toml -- --check
+          cargo +1.99.0 test --manifest-path tools/web-build/Cargo.toml --locked
+          cargo +1.99.0 run --manifest-path tools/web-build/Cargo.toml --locked -- graph --product-root .
+          cargo +1.99.0 fmt --manifest-path tools/rustify-views/Cargo.toml -- --check
+          cargo +1.99.0 test --manifest-path tools/rustify-views/Cargo.toml --locked
+          cargo +1.99.0 run --manifest-path tools/rustify-views/Cargo.toml --locked -- --check web/leptos/src
       - name: Check portable browser source and contracts
         run: |
           cargo +1.99.0 fmt --manifest-path web/leptos/Cargo.toml -- --check

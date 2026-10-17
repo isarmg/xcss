@@ -1,0 +1,42 @@
+[package]
+name = "xcss-rustify-views"
+version = "1.0.0"
+edition = "2024"
+rust-version = "1.99"
+license = "Apache-2.0"
+description = "Source-preserving Leptos view macro to ordinary Rust builder migration"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "=1.0.104"
+proc-macro2 = { version = "=1.0.107", features = ["span-locations"] }
+quote = "=1.0.47"
+syn = { version = "=3.0.9", features = ["full"] }
+prettyplease = "=0.3.0"
+rstml = "=0.13.1"
+convert_case = "=0.11.0"
+convert_case_extras = "=0.2.0"
+leptos_hot_reload = "=0.8.7"
+html-escape = "=0.2.15"
+cfg-if = "=1.0.4"
+serde_json = "=1.0.154"
+
+[features]
+# The included upstream codegen checks these flags. The migration always uses
+# stable builders with the exact integrated macro feature selection.
+default = ["csr"]
+csr = []
+__internal_erase_components = []
+nightly = []
+
+[profile.dev]
+debug = 0
+
+[profile.test]
+debug = 0
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = ["cfg(rustc_nightly)"]

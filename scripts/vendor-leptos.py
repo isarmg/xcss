@@ -19,6 +19,17 @@ def main() -> None:
     project = Path(__file__).resolve().parents[1]
     source = project / "web/leptos"
     paths = [source / "Cargo.toml", *sorted((source / "src").rglob("*.rs"))]
+    # Runtime and host macros are one reviewed xcss browser distribution. Keep
+    # their own names, MIT notices and upstream/patch manifests intact.
+    for name in ("leptos-csr", "leptos-macro-csr"):
+        directory = source / "vendor" / name
+        if directory.is_symlink() or not (directory / "SOURCE.json").is_file():
+            raise SystemExit(f"Missing integrated CSR source: {directory}")
+        for path in sorted(directory.rglob("*")):
+            if path.is_symlink():
+                raise SystemExit(f"Integrated CSR source contains a symlink: {path}")
+            if path.is_file():
+                paths.append(path)
     payload = {str(path.relative_to(source)): path.read_bytes() for path in paths}
     payload["LICENSE"] = (project / "LICENSE").read_bytes()
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project, text=True).strip()
@@ -49,7 +60,11 @@ def main() -> None:
             for name, data in payload.items():
                 path = destination / name
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(data)
+                # Preserve Cargo's input mtimes when only source provenance or
+                # another package changed; an identical sync must not force a
+                # full browser rebuild in every independent product.
+                if not path.exists() or path.read_bytes() != data:
+                    path.write_bytes(data)
         # These independent build/server adapters accompany the browser snapshot.
         adapters = {
             "web/leptos-assets.mjs": project / "web/leptos-assets.mjs",
@@ -65,7 +80,8 @@ def main() -> None:
                     raise SystemExit(f"Leptos asset adapter is stale: {product}/{relative}")
             else:
                 target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(expected)
+                if not target.exists() or target.read_bytes() != expected:
+                    target.write_bytes(expected)
         print(f"{product}: xcss-web source {'verified' if args.check else 'copied'}")
 
 

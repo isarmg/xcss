@@ -61,6 +61,40 @@ fn embedded_get_head_and_exact_types() {
 }
 
 #[test]
+fn embedded_public_video_retains_media_type_and_head_contract() {
+    let bytes = b"public MP4 payload fixture";
+    let asset = EmbeddedAsset {
+        path: "legacy/backgroundVideo.mp4",
+        bytes,
+        content_type: content_type("legacy/backgroundVideo.mp4"),
+        sha256: Box::leak(sha256(bytes).into_boxed_str()),
+    };
+    let assets = Box::leak(vec![asset].into_boxed_slice());
+    let get = response(
+        assets,
+        "/legacy/backgroundVideo.mp4",
+        &Method::GET,
+        &HeaderMap::new(),
+    );
+    assert_eq!(get.status(), StatusCode::OK);
+    assert_eq!(get.headers()[header::CONTENT_TYPE], "video/mp4");
+    assert_eq!(get.headers()[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(get.body().as_ref(), bytes);
+    let head = response(
+        assets,
+        "/legacy/backgroundVideo.mp4",
+        &Method::HEAD,
+        &HeaderMap::new(),
+    );
+    assert!(head.body().is_empty());
+    assert_eq!(head.headers(), get.headers());
+    assert_eq!(
+        content_type("unrecognized.payload"),
+        "application/octet-stream"
+    );
+}
+
+#[test]
 fn conditional_requests_accept_weak_lists_and_wildcard() {
     let (assets, _, _) = fixture();
     let get = response(assets, "/assets/app.js", &Method::GET, &HeaderMap::new());

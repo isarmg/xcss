@@ -56,15 +56,15 @@ python3 xcss/scripts/vendor-leptos.py --check
 
 验收包括 Rust 原生契约测试、严格 Clippy/rustfmt、构建脚本输入追溯测试，以及实际加载 WASM 的 Chromium/Firefox 浏览器用例。页面上的 `data-xcss-runtime="leptos"` 仅由 Rust 启动代码设置，不能仅凭 Vite 构建成功判断迁移完成。后台嵌入资源检查验证 WASM 魔数、精确字节与 application/wasm MIME，保留字体许可证及现有缓存/CSP规则。
 
-首次迁移记录分别位于：
+首次迁移记录使用固定提交链接复查；已完成的迁移分支现已删除：
 
 - [公共浏览器组件](leptos-web.md)
-- [媒体管理](https://github.com/isarmg/xcos/blob/feat/leptos-migration/docs/leptos-web.md)
-- [文件管理](https://github.com/isarmg/xczs/blob/feat/leptos-migration/docs/leptos-browser.md)
-- [内容系统](https://github.com/isarmg/xocs/blob/feat/leptos-migration/docs/leptos-migration.md)
-- [RustDesk 管理](https://github.com/isarmg/xscs/blob/feat/leptos-migration/docs/leptos-web.md)
-- [主机监控](https://github.com/isarmg/xsos/blob/feat/leptos-migration/docs/leptos-web.md)
-- [用户与配额](https://github.com/isarmg/xszs/blob/feat/leptos-migration/docs/leptos-web.md)
+- [媒体管理](https://github.com/isarmg/xcos/blob/3875d1d8406187243463980897ffd103e9b857a1/docs/leptos-web.md)
+- [文件管理](https://github.com/isarmg/xczs/blob/3c585b609314f01eabd2696562788b4d29e08750/docs/leptos-browser.md)
+- [内容系统](https://github.com/isarmg/xocs/blob/899839b1740562bf527356830315d5a31262d68b/docs/leptos-migration.md)
+- [RustDesk 管理](https://github.com/isarmg/xscs/blob/0f21b0cc1281e5bbca89006e4d7d389417251247/docs/leptos-web.md)
+- [主机监控](https://github.com/isarmg/xsos/blob/d5a7c3f19ec6ef8c910845dcf2c87732758a20d4/docs/leptos-web.md)
+- [用户与配额](https://github.com/isarmg/xszs/blob/ef1d2e094c3c4702f2d3225c62ee7d828a75a44a/docs/leptos-web.md)
 
 
 ## Axum 对 WASM 的适配

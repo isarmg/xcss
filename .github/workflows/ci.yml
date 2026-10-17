@@ -147,7 +147,7 @@ jobs:
         run: python3 scripts/package-artifacts.py smoke
 
   browser_rust:
-    name: Portable Leptos browser library
+    name: Portable xcss-web browser library
     needs: scope
     if: ${{ !cancelled() && needs.scope.outputs.run_full != 'false' }}
     permissions:
@@ -167,10 +167,10 @@ jobs:
           cargo +1.99.0 run --manifest-path tools/web-build/Cargo.toml --locked -- graph --product-root .
           cargo +1.99.0 fmt --manifest-path tools/rustify-views/Cargo.toml -- --check
           cargo +1.99.0 test --manifest-path tools/rustify-views/Cargo.toml --locked
-          cargo +1.99.0 run --manifest-path tools/rustify-views/Cargo.toml --locked -- --check web/leptos/src
+          cargo +1.99.0 run --manifest-path tools/rustify-views/Cargo.toml --locked -- --check web/xcss-web/src
       - name: Check portable browser source and contracts
         run: |
-          cargo +1.99.0 fmt --manifest-path web/leptos/Cargo.toml -- --check
-          cargo +1.99.0 clippy --manifest-path web/leptos/Cargo.toml --target wasm32-unknown-unknown --locked -- -D warnings
-          cargo +1.99.0 test --manifest-path web/leptos/Cargo.toml --locked
-          python3 -I -B scripts/test-leptos-build.py
+          cargo +1.99.0 fmt --manifest-path web/xcss-web/Cargo.toml -- --check
+          cargo +1.99.0 clippy --manifest-path web/xcss-web/Cargo.toml --target wasm32-unknown-unknown --locked -- -D warnings
+          cargo +1.99.0 test --manifest-path web/xcss-web/Cargo.toml --locked
+          python3 -I -B scripts/test-xcss-web-build.py

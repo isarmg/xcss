@@ -1,8 +1,8 @@
-//! Convert source-level Leptos RSX into the exact framework's ordinary Rust DOM
+//! Convert source-level xcss-web RSX into the exact framework's ordinary Rust DOM
 //! and component builders, without expanding components or handwritten macros.
 //!
 //! The code generator is the same pinned, MIT-licensed implementation shipped
-//! in xcss's integrated Leptos snapshot. We deliberately disable inert HTML:
+//! in xcss's integrated xcss-web snapshot. We deliberately disable inert HTML:
 //! static elements must become DOM builder calls too, never HTML strings.
 use anyhow::{Context, Result, bail, ensure};
 use proc_macro2::{TokenStream, TokenTree};
@@ -11,11 +11,11 @@ use std::ops::Range;
 use syn::spanned::Spanned;
 
 
-#[path = "../../../web/leptos/vendor/leptos-macro-csr/src/diagnostics.rs"]
+#[path = "../../../web/xcss-web/vendor/xcss-web-macro/src/diagnostics.rs"]
 #[rustfmt::skip]
 #[allow(dead_code)]
 mod diagnostics;
-#[path = "../../../web/leptos/vendor/leptos-macro-csr/src/view/mod.rs"]
+#[path = "../../../web/xcss-web/vendor/xcss-web-macro/src/view/mod.rs"]
 #[rustfmt::skip]
 mod view;
 
@@ -126,10 +126,10 @@ fn generate_expression(tokens: TokenStream) -> Result<syn::Expr> {
         .parse_simple(input)
         .context("cannot parse the original view RSX")?;
     let rendered = view::render_view(&mut nodes, global_class.as_ref(), None, true)
-        .context("the pinned Leptos view code generator rejected this RSX")?
+        .context("the pinned xcss-web view code generator rejected this RSX")?
         .unwrap_or_else(|| quote!(()));
     syn::parse2(component_adapter_lints(rendered))
-        .context("Leptos generated a non-expression builder")
+        .context("xcss-web generated a non-expression builder")
 }
 
 fn expression_source(expression: syn::Expr) -> Result<String> {
@@ -252,7 +252,7 @@ pub fn convert(source: &str) -> Result<Conversion> {
     unreachable!()
 }
 
-/// Shorten only equivalent public Leptos paths, never text/HTML/URL literals.
+/// Shorten only equivalent public xcss-web paths, never text/HTML/URL literals.
 /// Component helpers receive explicit ordinary Rust imports; rendering adapters
 /// use the prelude already required by the authored application views.
 pub fn shorten_paths(source: &str) -> Result<String> {
@@ -262,24 +262,28 @@ pub fn shorten_paths(source: &str) -> Result<String> {
         import: Option<&'static str>,
     }
     let rules: Vec<_> = [
-        ("::leptos::tachys::html::element::", "leptos::html::", None),
-        ("::leptos::tachys::html::event::", "leptos::ev::", None),
-        ("::leptos::tachys::svg::", "leptos::svg::", None),
-        ("::leptos::tachys::mathml::", "leptos::math::", None),
-        ("::leptos::prelude::View::", "View::", None),
-        ("::leptos::prelude::IntoRender::", "IntoRender::", None),
         (
-            "::leptos::prelude::IntoMaybeErased::",
+            "::xcss_web::tachys::html::element::",
+            "xcss_web::html::",
+            None,
+        ),
+        ("::xcss_web::tachys::html::event::", "xcss_web::ev::", None),
+        ("::xcss_web::tachys::svg::", "xcss_web::svg::", None),
+        ("::xcss_web::tachys::mathml::", "xcss_web::math::", None),
+        ("::xcss_web::prelude::View::", "View::", None),
+        ("::xcss_web::prelude::IntoRender::", "IntoRender::", None),
+        (
+            "::xcss_web::prelude::IntoMaybeErased::",
             "IntoMaybeErased::",
             None,
         ),
         (
-            "::leptos::component::component_props_builder",
+            "::xcss_web::component::component_props_builder",
             "component_props_builder",
             Some("component_props_builder"),
         ),
         (
-            "::leptos::component::component_view",
+            "::xcss_web::component::component_view",
             "component_view",
             Some("component_view"),
         ),
@@ -354,7 +358,7 @@ pub fn shorten_paths(source: &str) -> Result<String> {
         output.insert_str(
             at,
             &format!(
-                "\nuse leptos::component::{{{}}};\n",
+                "\nuse xcss_web::component::{{{}}};\n",
                 imports.into_iter().collect::<Vec<_>>().join(", ")
             ),
         );
@@ -454,11 +458,11 @@ pub fn repair_erased_codegen(source: &str) -> Result<Conversion> {
     }
     let patterns = [
         signature(
-            "::leptos::tachys::view::iterators::StaticVec::from"
+            "::xcss_web::tachys::view::iterators::StaticVec::from"
                 .parse()
                 .unwrap(),
         ),
-        signature("::leptos::__as_shared_reactive_fn".parse().unwrap()),
+        signature("::xcss_web::__as_shared_reactive_fn".parse().unwrap()),
     ];
     let mut output = source.to_owned();
     let mut total = 0;
@@ -493,7 +497,7 @@ mod tests {
     #[test]
     fn native_builders_preserve_events_components_properties_svg_and_nested_views() {
         let source = r#"
-use leptos::prelude::*;
+use xcss_web::prelude::*;
 // Outside security policy stays exactly here.
 #[component]
 fn Example() -> impl IntoView {
@@ -513,8 +517,8 @@ fn Example() -> impl IntoView {
         assert!(changed.source.contains(".child("));
         assert!(changed.source.contains(".on("));
         assert!(changed.source.contains(".prop("));
-        assert!(changed.source.contains("leptos::html::div()"));
-        assert!(changed.source.contains("use leptos::component::"));
+        assert!(changed.source.contains("xcss_web::html::div()"));
+        assert!(changed.source.contains("use xcss_web::component::"));
         assert!(changed.source.contains("clippy::unit_arg"));
         assert!(changed.source.contains("clippy::let_unit_value"));
         assert!(!changed.source.contains("#![allow"));
@@ -577,7 +581,7 @@ fn ui() -> impl IntoView {
     #[test]
     fn nested_views_inside_opaque_rust_macros_are_not_silently_skipped() {
         let changed =
-            convert("fn ui(){vec![leptos::view!{<p>\"one\"</p>}, view!{<i>\"two\"</i>}];}")
+            convert("fn ui(){vec![xcss_web::view!{<p>\"one\"</p>}, view!{<i>\"two\"</i>}];}")
                 .unwrap();
         assert_eq!(changed.view_macros, 2);
         assert!(!changed.source.contains("view!"));
@@ -587,7 +591,7 @@ fn ui() -> impl IntoView {
     #[test]
     fn explicit_recovery_reverts_only_erased_codegen_and_keeps_comments() {
         let source = r#"// keep security note
-fn ui(){::leptos::tachys::view::iterators::StaticVec::from(vec![html::p(),::leptos::__as_shared_reactive_fn(move||html::div())]);}"#;
+fn ui(){::xcss_web::tachys::view::iterators::StaticVec::from(vec![html::p(),::xcss_web::__as_shared_reactive_fn(move||html::div())]);}"#;
         let recovered = repair_erased_codegen(source).unwrap();
         assert_eq!(recovered.view_macros, 2);
         assert!(recovered.source.starts_with("// keep security note"));

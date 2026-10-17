@@ -1,14 +1,14 @@
 # 集成式 CSR 与 Rust 原生视图
 
-本分支把第二轮精简版 Leptos 0.8.19 核心和配套过程宏纳入 `xcss` 源码，统一提供给 xcos、xczs、xocs、xscs、xsos、xszs。六项目保持 Axum API 和静态资源后端，浏览器只构建 CSR。
+`main` 中的 `xcss-web` 统一向 xcos、xczs、xocs、xscs、xsos、xszs 提供浏览器框架与公共组件。六项目使用 Axum API 和静态资源后端，浏览器只构建 CSR。
 
-`xcss` 的 Linux 服务端 crate、`web/leptos` 的 `xcss-web` 浏览器库、精简 Leptos 核心、主机过程宏以及 `tools/web-build` 构建程序保留独立的 Cargo 边界。服务端不会因此引入浏览器渲染器；集中源码管理也不代表把第三方代码改称自主框架。
+`xcss` 的 Linux 服务端 crate、`web/xcss-web` 的公开浏览器 crate、内部核心、主机过程宏以及 `tools/web-build` 构建程序保留独立的 Cargo 边界。来源和许可见[仓库 README](../README.md#xcss-web-来源)。
 
-核心和宏位于 `web/leptos/vendor/{leptos-csr,leptos-macro-csr}`。各自保留 MIT 许可、原发布源、第二轮补丁摘要与逐文件 `SOURCE.json`。共享库和两个框架包作为完整源码快照同步到产品的 `web/leptos/vendor/xcss-web`，产品可独立 checkout 和构建，不需要相邻工作目录或额外 Leptos Git 仓库。
+核心和宏位于 `web/xcss-web/vendor/{xcss-web-core,xcss-web-macro}`。各自的 `SOURCE.json` 校验完整文件集，其中包含 README 和许可证。公开 crate 和两个内部 crate 作为完整源码快照同步到产品的 `web/xcss-web/vendor/xcss-web`，产品可独立 checkout 和构建。
 
-共享库和产品均使用 `default-features = false, features = ["csr"]`，产品根 manifest 同时补丁核心和宏。Cargo 只采用根 manifest 的 `[patch]`，所以不能仅在共享库内部声明补丁后假定所有消费者都会继承。Rust 构建器核对选中包的身份、实际路径、功能和宏/运行时角色，拒绝 SSR、hydration、full 和 server-function 依赖图。
+产品仅声明 `xcss-web = { path = "vendor/xcss-web", default-features = false, features = ["csr"] }`。公开 crate 通过路径依赖连接内部核心与宏，公开 Rust 路径为 `xcss_web`；无需依赖注册表中的框架包或设置覆盖补丁。Rust 构建器核对唯一公开 crate、内部包身份、实际路径、功能和宏/运行时角色，拒绝 SSR、hydration、full 和 server-function 依赖图。
 
-视图源码采用普通 Rust DOM 与组件构建表达式；`#[component]` 仍是 Rust 属性过程宏。事件闭包、信号、Owner、Effect、cleanup、Portal、焦点与异步取消继续使用已集成的 Leptos 实现。普通 Rust 表达式可以直接由 `rustfmt` 和 Clippy 检查，原视图宏的自定义 HTML token 不再出现在业务和共享组件源码中。
+视图源码采用普通 Rust DOM 与组件构建表达式；`#[component]` 仍是 Rust 属性过程宏。事件闭包、信号、Owner、Effect、cleanup、Portal、焦点与异步取消继续使用已集成的 xcss-web 实现。普通 Rust 表达式可以直接由 `rustfmt` 和 Clippy 检查，原视图宏的自定义 HTML token 不再出现在业务和共享组件源码中。
 
 迁移工具 `tools/rustify-views` 复用这份框架自己的视图代码生成实现，按源位置替换宏；嵌套视图重新解析，外部注释保留，宏内注释转为邻近 Rust 注释。它使用实际 CSR 宏配置。Cargo metadata 中的条件功能并集不能替代本次主机宏的编译 feature；验证时另核对实际编译记录。
 
@@ -23,10 +23,10 @@
 ```sh
 cargo +1.99.0 test --locked --manifest-path tools/web-build/Cargo.toml
 cargo +1.99.0 test --locked --manifest-path tools/rustify-views/Cargo.toml
-cargo +1.99.0 run --locked --manifest-path tools/rustify-views/Cargo.toml -- --check web/leptos/src
-cargo +1.99.0 fmt --manifest-path web/leptos/Cargo.toml -- --check
-cargo +1.99.0 clippy --locked --manifest-path web/leptos/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
-python3 scripts/vendor-leptos.py --check
+cargo +1.99.0 run --locked --manifest-path tools/rustify-views/Cargo.toml -- --check web/xcss-web/src
+cargo +1.99.0 fmt --manifest-path web/xcss-web/Cargo.toml -- --check
+cargo +1.99.0 clippy --locked --manifest-path web/xcss-web/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
+python3 scripts/vendor-xcss-web.py --check
 ```
 
 构建与发布资源合同详见 [Rust 构建工具](../tools/web-build/README.md)。原精简实验报告保留自己的业务基线与测试范围，不能把新 DTO、Markdown 或视图改写混入旧实验百分比。

@@ -21,8 +21,8 @@ xcss 为服务端和管理 Web 提供公共 Rust crate 与 npm 包。产品在�
 
 Rust 与 Web 构建目标为 Linux x86_64 GNU；部署后的浏览器页面可跨平台访问。代码采用 [Apache License 2.0](../LICENSE)。
 
-- [Leptos 浏览器公共库与独立构建](leptos-web.md)
-- [七仓库 React 到 Leptos 迁移总览与分支约定](leptos-workspace-migration.md)
+- [xcss-web 浏览器公共库与独立构建](xcss-web.md)
+- [七仓库 React 到 xcss-web 迁移总览与分支约定](xcss-web-workspace-migration.md)
 - [集成式 CSR、纯 Rust 视图与生产构建](rust-native-csr.md)
-- [类型化 HTTP 请求与响应合同](leptos-typed-http.md)
+- [类型化 HTTP 请求与响应合同](xcss-web-typed-http.md)
 - [Rust 原生迁移验证与实测体积](rust-native-validation.md)

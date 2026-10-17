@@ -1,6 +1,6 @@
 # Rust 原生 CSR 迁移验证记录
 
-本记录对应 `feat/rust-native-web` 的迁移验收。六个应用继续使用 Axum，精简 Leptos 0.8.19 由 xcss 统一分发，只构建 CSR；视图采用普通 Rust 函数式 builder。验收时迁移分支尚未合并，各应用的 main 仍保留 React，测试未部署到线上。
+本记录对应 `feat/rust-native-web` 的迁移验收。六个应用继续使用 Axum，精简 xcss-web-core 0.8.19 由 xcss 统一分发，只构建 CSR；视图采用普通 Rust 函数式 builder。验收时迁移分支尚未合并，各应用的 main 仍保留 React，测试未部署到线上。
 
 2026-10-17，上述迁移及相关 xssi 校验支持已合并到八个仓库的 `main`，成为当前主分支方案；未创建正式发行或执行线上部署。当前接入见 [main 使用说明](../README.md)，首次迁移的分支安排与验收数据按原记录保留。
 
@@ -21,7 +21,7 @@
 | xsos | 1,073,021 | 325,178 | 18 | 12,363,404 |
 | xszs | 827,733 | 262,983 | 18 | 12,052,636 |
 
-相同 typed 业务、同一精简框架基线下，xscs 原 view! 与函数式视图的真实 Axum 字节对照为：WASM 782,998 → 784,251 B（+0.16%）；构建器 gzip 238,870 → 239,679 B（+0.34%）。两者使用同一真实登录/设备写入浏览器 harness，每个引擎各 11 组通过。该对照只评估视图改写，不能当作 React 对 Leptos 的性能比较。
+相同 typed 业务、同一精简框架基线下，xscs 原 view! 与函数式视图的真实 Axum 字节对照为：WASM 782,998 → 784,251 B（+0.16%）；构建器 gzip 238,870 → 239,679 B（+0.34%）。两者使用同一真实登录/设备写入浏览器 harness，每个引擎各 11 组通过。该对照只评估视图改写，不能当作 React 对 xcss-web 的性能比较。
 
 普通 Rust builder 关闭旧的静态 inert-template 路径，增加显式组件适配代码，并依赖这份固定框架的 helper API。收益是统一 Rust 语法、格式与类型检查；本轮没有证明启动、编译、内存或吞吐更快。框架 fork 与 helper 的升级维护需要继续承担回归成本。
 
@@ -57,4 +57,4 @@ xocs 公开图片/视频约 7.8 MB，旧 Vite 的 bundle 预算没有涵盖直�
 
 验收时的原始日志、精确 SHA 清单、第一次失败及私有 fixture 状态曾保存在 `.local/rust-native-web-2026-10-17/`。2026-10-17，确认 main 使用精简 CSR 后，已按要求删除四个迁移临时目录、相关工作树及迁移和实验分支。源码、工具、测试、来源元数据和本摘要保留在 main；生成物与私有状态不进入仓库。
 
-已合并实现使用以下固定提交复查：[xcss](https://github.com/isarmg/xcss/tree/d52485d40617bd16414cc147dcd2dbe85a4e3410)、[xcos](https://github.com/isarmg/xcos/tree/91ba2c338cd09cc9d6d16a4a1d33b240be061d68)、[xczs](https://github.com/isarmg/xczs/tree/94f0f38cb673bfd2a8d31ae3e335b577345b2a2f)、[xocs](https://github.com/isarmg/xocs/tree/ef55f5b8744014385efe986f06b9d1af37c69691)、[xscs](https://github.com/isarmg/xscs/tree/29b03e30a9f1bce5d8ea934641893ca4fa87340b)、[xsos](https://github.com/isarmg/xsos/tree/89b829b248b5624cd48be378550656344a4f6a50)、[xszs](https://github.com/isarmg/xszs/tree/49838edd03b7ddc2839f9aa3842f6cf73ab1df4e)、[xssi](https://github.com/isarmg/xssi/tree/81856c7ae7312ff3252463ee16f170e0ba487c23)。当前产品入口见[迁移总览](leptos-workspace-migration.md)。
+已合并实现使用以下固定提交复查：[xcss](https://github.com/isarmg/xcss/tree/d52485d40617bd16414cc147dcd2dbe85a4e3410)、[xcos](https://github.com/isarmg/xcos/tree/91ba2c338cd09cc9d6d16a4a1d33b240be061d68)、[xczs](https://github.com/isarmg/xczs/tree/94f0f38cb673bfd2a8d31ae3e335b577345b2a2f)、[xocs](https://github.com/isarmg/xocs/tree/ef55f5b8744014385efe986f06b9d1af37c69691)、[xscs](https://github.com/isarmg/xscs/tree/29b03e30a9f1bce5d8ea934641893ca4fa87340b)、[xsos](https://github.com/isarmg/xsos/tree/89b829b248b5624cd48be378550656344a4f6a50)、[xszs](https://github.com/isarmg/xszs/tree/49838edd03b7ddc2839f9aa3842f6cf73ab1df4e)、[xssi](https://github.com/isarmg/xssi/tree/81856c7ae7312ff3252463ee16f170e0ba487c23)。当前产品入口见[迁移总览](xcss-web-workspace-migration.md)。

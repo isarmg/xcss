@@ -1,8 +1,8 @@
 # 普通 Rust 函数式视图迁移工具
 
-本工具把 Leptos `view!` 的 authored RSX 源码改成真正的 Rust DOM/组件 builder，不展开 `#[component]`、不重写业务表达式，不用 HTML 字符串或额外的 UI 宏替代原界面。
+本工具把 xcss-web `view!` 的 authored RSX 源码改成真正的 Rust DOM/组件 builder，不展开 `#[component]`、不重写业务表达式，不用 HTML 字符串或额外的 UI 宏替代原界面。
 
-代码生成直接通过 `#[path]` 复用当前仓库 `web/leptos/vendor/leptos-macro-csr/src/view/` 与 `diagnostics.rs` 的正式实现。这些文件保留原 MIT 许可证与源码记录；没有另一套手写 HTML 解析器。解析使用同版 rstml，默认功能与本轮集成宏一致：仅 `csr`。它依据实际 Cargo host fingerprint；全量 metadata 的 resolve node 会合并 `cfg(erase_components)` 的另一条依赖功能，不能用那个并集代替真实编译配置。工具拒绝启用 `__internal_erase_components` 运行。其他功能集不能未经验证混用。
+代码生成直接通过 `#[path]` 复用当前仓库 `web/xcss-web/vendor/xcss-web-macro/src/view/` 与 `diagnostics.rs` 的正式实现。这些文件保留原 MIT 许可证与源码记录；没有另一套手写 HTML 解析器。解析使用同版 rstml，默认功能与本轮集成宏一致：仅 `csr`。它依据实际 Cargo host fingerprint；全量 metadata 的 resolve node 会合并 `cfg(erase_components)` 的另一条依赖功能，不能用那个并集代替真实编译配置。工具拒绝启用 `__internal_erase_components` 运行。其他功能集不能未经验证混用。
 
 ## 使用
 
@@ -10,10 +10,10 @@
 
 ```sh
 cargo test --locked --offline --manifest-path tools/rustify-views/Cargo.toml
-cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --dry-run ../xocs/web/leptos/src
-cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --stdout ../xocs/web/leptos/src/lib.rs
-cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --write ../xocs/web/leptos/src
-cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --check ../xocs/web/leptos/src
+cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --dry-run ../xocs/web/xcss-web/src
+cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --stdout ../xocs/web/xcss-web/src/lib.rs
+cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --write ../xocs/web/xcss-web/src
+cargo run --locked --offline --manifest-path tools/rustify-views/Cargo.toml -- --check ../xocs/web/xcss-web/src
 ```
 
 默认 dry-run 只在内存中完成转换、解析和统计；`--stdout` 展示一个文件。`--write` 在所有输入转换成功后，逐文件以临时文件和 rename 替换。目录遍历排除 `vendor`、`target`、`pkg`、`dist`、`.git`，拒绝符号链接；因此各产品的 vendored xcss 必须从 canonical xcss 同步，不能靠宽泛遍历碰运气。

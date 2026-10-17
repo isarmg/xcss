@@ -38,34 +38,39 @@ xcss `1.0.0` 的 `xcss::web_assets` 生成资源表、确定性 JSON 清单和 S
 Axum 用 `response.map(axum::body::Body::from)`；Hyper 用
 `response.map(http_body_util::Full::new)`。产品挂载在路径前缀下时，先剥离挂载前缀再查资源。
 
+构建时生成 `.wasm.gz` 后，可用 `xcss::web_assets::wasm::response` 包装实际资源查询函数。该公共实现按
+`Accept-Encoding` 协商 gzip，为成功和 304 响应保留 `Vary: Accept-Encoding`，使用压缩表示本身的
+ETag，并保留 HEAD 和缺少压缩文件时的原资源查询行为。它使用通用 HTTP 类型，Axum 产品无需复制
+压缩协商模块。此接口不对 API 响应作动态压缩。
+
 ## 使用共同构建入口
 
-安装锁定的 xcss Web 包后，在产品根目录执行本地 bin：
+在产品根目录使用当前 Rust 构建入口：
 
 ```bash
-./web/node_modules/.bin/xcss-build-server --mode development
-./web/node_modules/.bin/xcss-build-server --mode release
+cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- server --product-root . --mode development
+cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- server --product-root . --mode release
 ```
 
-bin 所在目录随 npm 软件包根目录变化；根 Web 的 bin 位于 `./node_modules/.bin`。正式模式要求干净
-Git 工作树和完整源码修订号，执行锁定前端安装、前端构建、Linux AMD64 GNU Rust 编译，最后静态核对
+生产构建不要求 npm 安装。正式模式要求干净 Git 工作树和完整源码修订号，执行锁定的 WASM 与前端
+资源构建、Linux AMD64 GNU Rust 编译，最后静态核对
 实际生成的 binary 内嵌资源与同次编译收据，不启动候选程序。单独 `cargo build` 不能证明 dist 是本次生成的。
 
 产品专用打包器可以把这一步作为子步骤。需要隔离源码归档、离线 vendor、签名或伴随程序的流程，
-继续证明其独有合同，再用共同 `--verify-only --binary <path> --dist <path> --receipt <path>` 核对真实 binary。
+继续证明其独有合同，再用同一 CLI 的 `verify --binary <path> --dist <path> --receipt <path>` 核对真实 binary。
 此接口只证明内嵌 Web 与 dist 字节相同，不能代替源码、状态或部署验证。
 
 ## 热更新与正式验收
 
 development 模式使用未绑定源码身份。产品显式选择 `DirectoryAssets::new(absolute_root)` 后，HTTP
-请求读取当前目录资源，前端重新构建立即生效。Vite 开发服务也可以代理产品 API；它负责页面热更新。
-两种开发方式都不修改正式 binary 的资源身份。
+请求读取当前目录资源，前端重新构建立即生效。Rust CLI 的 `serve` 按 `web/rust-web.toml` 代理实际产品
+API、监听源码并重建页面；`preview` 只提供已构建资源。开发方式不修改正式 binary 的资源身份。
 
 正式模式只选择内嵌提供器，并拒绝开发目录覆盖。选择内嵌提供器验收时，改动 Web 需要重新构建 binary。
 这是资源与服务端同一版本的直接结果。不要让缺失目录触发回退，或在 production 读取可编辑 dist。
 
 共享 HTTP 行为包括 GET/HEAD、准确 MIME、`nosniff`、HTML `no-store`、资源 SHA-256 ETag 与 304。
-普通资源使用 `no-cache` 重新验证，因为仅凭 Vite 文件名不能证明名字就是内容 SHA-256。拥有已验证
+普通资源使用 `no-cache` 重新验证，因为仅凭文件名不能证明名字就是内容 SHA-256。拥有已验证
 内容命名空间的产品可明确扩展 immutable 缓存；产品 CSP 仍由产品既有安全边界控制。
 
 ## 检查接入结果

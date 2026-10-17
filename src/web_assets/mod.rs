@@ -19,6 +19,7 @@ use std::{
 };
 
 pub mod build;
+pub mod wasm;
 
 /// Inventory format identity. Its canonical compact JSON bytes are hashed verbatim.
 pub const MANIFEST_FORMAT: &str = "web-assets-v1";

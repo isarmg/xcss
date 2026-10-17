@@ -182,3 +182,20 @@ pub async fn restore_session() -> String {
         Err(error) => error.code,
     }
 }
+
+// Browser regressions can queue auth intents independently of mounted forms.
+#[wasm_bindgen]
+pub async fn login_session(username: String, password: String) -> String {
+    match api::login(&username, &password).await {
+        Ok(_) => "authenticated".into(),
+        Err(error) => error.code,
+    }
+}
+
+#[wasm_bindgen]
+pub async fn logout_session() -> String {
+    match api::logout().await {
+        Ok(()) => "anonymous".into(),
+        Err(error) => error.code,
+    }
+}

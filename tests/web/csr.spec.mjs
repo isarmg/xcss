@@ -315,3 +315,82 @@ test("restore cannot reopen protected content during pending or unconfirmed logo
   expect(await restore()).toBe("auth.session_required");
   await expect(page.locator("main")).toHaveCount(0);
 });
+
+for (const logoutSucceeds of [false, true]) test(`a queued failed login preserves ${logoutSucceeds ? "confirmed" : "unconfirmed"} logout`, async ({ page }) => {
+  const pending = gate(); let logoutCalls = 0, loginCalls = 0, acceptLogin = false;
+  await page.route("**/api/v1/auth/logout", async route => {
+    logoutCalls++; await pending.pending;
+    if (logoutSucceeds) await route.fulfill({ status: 204 });
+    else await json(route, failure("server.unavailable"), 503);
+  });
+  await page.route("**/api/v1/auth/login", route => {
+    loginCalls++;
+    return acceptLogin ? json(route, session("other")) : json(route, failure("auth.invalid_credentials"), 401);
+  });
+  await authenticated(page);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect.poll(() => logoutCalls).toBe(1);
+  // Queue the real WASM API while logout owns the mutex, retaining its result.
+  await page.evaluate(async () => {
+    const api = await import("/pkg/csr_fixture.js");
+    window.queuedLogin = api.login_session("admin", "valid password 123");
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  expect(loginCalls).toBe(0);
+  pending.release();
+  expect(await page.evaluate(() => window.queuedLogin)).toBe("auth.invalid_credentials");
+  expect(loginCalls).toBe(1);
+  await expect(page.locator("main")).toHaveCount(0);
+  const restore = () => page.evaluate(async () => (await import("/pkg/csr_fixture.js")).restore_session());
+  if (logoutSucceeds) {
+    await page.route("**/api/v1/auth/session", route => json(route, failure(), 401));
+    expect(await restore()).toBe("auth.session_required");
+    await expect(page.getByRole("button", { name: "Retry sign out" })).toHaveCount(0);
+  } else {
+    await expect(page.getByRole("button", { name: "Retry sign out" })).toBeVisible();
+    expect(await restore()).toBe("auth_logout_unconfirmed");
+  }
+  // Explicit successful login must still replace either settled outcome.
+  acceptLogin = true;
+  expect(await page.evaluate(async () => (await import("/pkg/csr_fixture.js")).login_session("other", "valid password 123"))).toBe("authenticated");
+  await expect(page.getByRole("button", { name: "Sign out", exact: true })).toBeVisible();
+  await page.route("**/api/v1/auth/session", route => json(route, session("other")));
+  expect(await restore()).toBe("authenticated");
+});
+
+for (const firstLogoutSucceeds of [false, true]) test(`logout/login/logout keeps the latest revocation barrier after earlier ${firstLogoutSucceeds ? "success" : "failure"}`, async ({ page }) => {
+  const first = gate(), last = gate(); let logoutCalls = 0;
+  const tokens = [];
+  await page.route("**/api/v1/auth/logout", async route => {
+    tokens.push(route.request().headers()["x-csrf-token"]);
+    logoutCalls++;
+    if (logoutCalls === 1) {
+      await first.pending;
+      if (firstLogoutSucceeds) await route.fulfill({ status: 204 });
+      else await json(route, failure("server.unavailable"), 503);
+    } else {
+      await last.pending; await json(route, failure("server.unavailable"), 503);
+    }
+  });
+  await page.route("**/api/v1/auth/login", route => json(route, { ...session("other"), csrf_token: "B".repeat(42) + "A" }));
+  await authenticated(page);
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
+  await expect.poll(() => logoutCalls).toBe(1);
+  await page.evaluate(async () => {
+    const api = await import("/pkg/csr_fixture.js");
+    window.queuedLogin = api.login_session("other", "valid password 123");
+    // Let spawn_local record this intent before queuing the next one.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    window.queuedLogout = api.logout_session();
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  first.release(); await expect.poll(() => logoutCalls).toBe(2);
+  expect(await page.evaluate(() => window.queuedLogin)).toBe("auth_operation_superseded");
+  const restore = () => page.evaluate(async () => (await import("/pkg/csr_fixture.js")).restore_session());
+  expect(await restore()).toBe("auth_logout_unconfirmed");
+  await expect(page.locator("main")).toHaveCount(0);
+  expect(tokens).toEqual(["A".repeat(43), "B".repeat(42) + "A"]);
+  last.release(); expect(await page.evaluate(() => window.queuedLogout)).toBe("server.unavailable");
+  await expect(page.getByRole("button", { name: "Retry sign out" })).toBeVisible();
+  expect(await restore()).toBe("auth_logout_unconfirmed");
+});

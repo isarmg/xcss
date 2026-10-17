@@ -24,6 +24,7 @@ from xcss_conformance import (  # noqa: E402
     verify_web,
 )
 from xcss_schema_compose import compose  # noqa: E402
+from xcss_conformance.policy import _discover_web_package  # noqa: E402
 
 
 VALID_MANIFEST = """\
@@ -120,6 +121,44 @@ class ConformanceTests(unittest.TestCase):
                 (product / "web" / "dist").symlink_to(outside, target_is_directory=True)
                 with self.assertRaisesRegex(ConformanceError, "escapes|linked"):
                     verify_web(product, ROOT)
+
+    def test_rust_csr_web_discovery_uses_declared_root_without_npm_dependency(self) -> None:
+        for directory in ("web", "."):
+            with self.subTest(directory=directory), tempfile.TemporaryDirectory() as temporary:
+                product = Path(temporary)
+                self.embedded_fixture(product)
+                (product / "xcss-layout.toml").unlink()
+                declaration = product / "xcss-web-build.json"
+                config = json.loads(declaration.read_text())
+                config["web"]["directory"] = directory
+                declaration.write_text(json.dumps(config))
+                package = product / directory / "package.json"
+                package.write_text(json.dumps({"scripts": {"build": "cargo run --locked --manifest-path tools/web-build/Cargo.toml -- build --product-root ."}}))
+                (product / "web/rust-web.toml").write_text('[web]\nkind="spa"\nentry="src/main.js"\n')
+                self.assertEqual(_discover_web_package(product, None), package)
+                self.assertEqual(verify_web(product, ROOT)["build"]["mode"], "embedded")
+                verify_source(product, ROOT)
+
+    def test_web_layout_cannot_disagree_with_production_build_declaration(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            product = Path(temporary)
+            self.embedded_fixture(product)
+            (product / "package.json").write_text('{}')
+            (product / "xcss-layout.toml").write_text('web_root="."\n')
+            with self.assertRaisesRegex(ConformanceError, "web_root conflicts"):
+                verify_web(product, ROOT)
+
+    def test_undeclared_web_discovery_keeps_ambiguity_and_missing_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            product = Path(temporary)
+            self.assertIsNone(_discover_web_package(product, None))
+            for name in ("first", "second"):
+                directory = product / name
+                directory.mkdir()
+                (directory / "package.json").write_text(json.dumps({"devDependencies": {"@xcss/web": "fixture"}}))
+            with self.assertRaisesRegex(ConformanceError, "multiple xcss Web package manifests"):
+                _discover_web_package(product, None)
+            self.assertEqual(_discover_web_package(product, Path("first")), product / "first/package.json")
 
     def test_shared_web_requires_runtime_and_build_crate_dependencies(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

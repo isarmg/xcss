@@ -500,6 +500,25 @@ def _discover_file(product_root: Path, filename: str, configured: Path | None) -
 
 
 def _discover_web_package(product_root: Path, configured: Path | None) -> Path | None:
+    # The validated embedded build declaration selects the production Web root.
+    # Rust CSR consumers need no npm @xcss/web dependency: their assets and
+    # runtime are independently pinned vendor snapshots. Do not infer this root
+    # from a hard-coded web/ layout (some products declare directory=".").
+    declaration = product_root / "xcss-web-build.json"
+    if declaration.is_file():
+        declared = _build_path(
+            product_root, product_root,
+            _json(declaration).get("web", {}).get("directory"), "web.directory",
+        )
+        if configured is not None:
+            explicit = _build_path(product_root, product_root, configured.as_posix(), "web_root")
+            if explicit != declared:
+                raise ConformanceError(
+                    "web_root conflicts with xcss-web-build.json web.directory"
+                )
+        package = declared / "package.json"
+        _regular_file(package)
+        return package
     if configured is not None:
         package = product_root / configured / "package.json"
         if not package.is_file():

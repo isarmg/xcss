@@ -270,7 +270,21 @@ for (const view of ["login", "workspace", "account"]) for (const colorScheme of 
   } else {
     await authenticated(page, view === "account" ? "/?lang=en#account" : "/?lang=en");
   }
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  const layout = await page.evaluate(() => ({
+    viewport: innerWidth,
+    width: document.documentElement.scrollWidth,
+    overflow: [...document.querySelectorAll("body *")].flatMap(node => {
+      const rect = node.getBoundingClientRect();
+      if (rect.right <= innerWidth && rect.left >= 0 && node.scrollWidth <= node.clientWidth) return [];
+      const style = getComputedStyle(node);
+      return [{ tag: node.tagName, id: node.id, class: node.className,
+        name: node.getAttribute("name"), label: node.getAttribute("aria-label"),
+        left: rect.left, right: rect.right, width: rect.width,
+        clientWidth: node.clientWidth, scrollWidth: node.scrollWidth,
+        display: style.display, minWidth: style.minWidth, gridColumns: style.gridTemplateColumns }];
+    }),
+  }));
+  expect(layout.width <= layout.viewport, JSON.stringify(layout, null, 2)).toBe(true);
   const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa", "wcag22aa"]).analyze();
   expect(results.violations).toEqual([]);
 });

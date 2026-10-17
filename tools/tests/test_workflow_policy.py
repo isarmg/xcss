@@ -18,6 +18,16 @@ SPEC.loader.exec_module(MODULE)
 
 
 class WorkflowPolicyTests(unittest.TestCase):
+    def test_failed_browser_diagnostics_use_an_exact_official_action(self) -> None:
+        source = ".github/workflows/ci.yml"
+        text = (ROOT / source).read_text()
+        MODULE.validate_workflow(source, text)
+        reference = "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
+        self.assertIn(reference, text)
+        for invalid in ("actions/upload-artifact@v7", "actions/upload-artifact@" + "0" * 40):
+            with self.subTest(invalid=invalid), self.assertRaises(MODULE.PolicyError):
+                MODULE.validate_workflow(source, text.replace(reference, invalid))
+
     def test_only_exact_release_path_gets_tag_scoped_write_permission(self) -> None:
         text = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
         MODULE.validate_workflow(".github/workflows/release.yml", text)

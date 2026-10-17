@@ -138,6 +138,7 @@ fn request_probe() -> impl IntoView {
     let result = RwSignal::new(String::from("idle"));
     (
         html::input()
+            .class("xcss-input")
             .node_ref(path)
             .aria_label("Probe API path")
             .value("/api/v1/probe"),

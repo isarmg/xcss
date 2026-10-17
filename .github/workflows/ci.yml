@@ -160,20 +160,16 @@ jobs:
           persist-credentials: false
       - name: Install exact browser Rust toolchain
         run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown
-      - name: Verify native asset tooling and Rust view syntax
+      - name: Verify native asset tooling
         run: |
           cargo +1.99.0 fmt --manifest-path tools/web-build/Cargo.toml -- --check
           cargo +1.99.0 test --manifest-path tools/web-build/Cargo.toml --locked
           cargo +1.99.0 run --manifest-path tools/web-build/Cargo.toml --locked -- graph --product-root .
-          cargo +1.99.0 fmt --manifest-path tools/rustify-views/Cargo.toml -- --check
-          cargo +1.99.0 test --manifest-path tools/rustify-views/Cargo.toml --locked
-          cargo +1.99.0 run --manifest-path tools/rustify-views/Cargo.toml --locked -- --check web/xcss-web/src
       - name: Check portable browser source and contracts
         run: |
           cargo +1.99.0 fmt --manifest-path web/xcss-web/Cargo.toml -- --check
           cargo +1.99.0 clippy --manifest-path web/xcss-web/Cargo.toml --target wasm32-unknown-unknown --locked -- -D warnings
           cargo +1.99.0 test --manifest-path web/xcss-web/Cargo.toml --locked
-          python3 -I -B scripts/test-xcss-web-build.py
 
   startup_browser:
     name: Real WASM startup failure and recovery

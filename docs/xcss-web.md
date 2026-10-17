@@ -21,7 +21,7 @@ python3 scripts/vendor-xcss-web.py --check
 
 可用 `--product xscs` 指定单个产品。脚本只同步明确的 Rust 源、Cargo 清单和许可证；遇到未知文件或符号链接会停止。产品无需此脚本或兄弟 checkout 即可构建。
 
-产品当前使用 `tools/web-build` 中的 Rust CLI，固定 Rust 1.99.0 和 wasm-bindgen 0.2.129；早期迁移保留的 `scripts/build-xcss-web.py` 不再是生产构建入口。当前构建在开始、结束时核对输入，验证 vendored 来源清单，并记录浏览器 Cargo.lock、依赖来源/校验和及生成文件哈希到 `web/pkg/xcss-web-build.json`。产品将这份记录一起嵌入 Axum 资源。
+产品使用 `tools/web-build` 中的 Rust CLI，固定 Rust 1.99.0 和 wasm-bindgen 0.2.129；已移除退役的 Python 构建器及其专属测试，来源清单和编译期间输入变化继续由 Rust 构建器及其单元测试验证。当前构建在开始、结束时核对输入，验证 vendored 来源清单，并记录浏览器 Cargo.lock、依赖来源/校验和及生成文件哈希到 `web/pkg/xcss-web-build.json`。产品将这份记录一起嵌入 Axum 资源。
 
 ## 验证
 

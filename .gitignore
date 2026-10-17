@@ -9,5 +9,3 @@ release/
 /playwright-report/
 
 /tools/web-build/target/
-
-/tools/rustify-views/target/

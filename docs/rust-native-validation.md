@@ -1,6 +1,8 @@
 # Rust 原生 CSR 迁移验证记录
 
-本记录对应 `feat/rust-native-web` 分支。六个应用继续使用 Axum，精简 Leptos 0.8.19 由 xcss 统一分发，只构建 CSR。原 React 方案保留在各应用的 main，迁移分支未合并或部署。
+本记录对应 `feat/rust-native-web` 的迁移验收。六个应用继续使用 Axum，精简 Leptos 0.8.19 由 xcss 统一分发，只构建 CSR；视图采用普通 Rust 函数式 builder。验收时迁移分支尚未合并，各应用的 main 仍保留 React，测试未部署到线上。
+
+2026-10-17，上述迁移及相关 xssi 校验支持已合并到八个仓库的 `main`，成为当前主分支方案；未创建正式发行或执行线上部署。当前接入见 [main 使用说明](../README.md)，首次迁移的分支安排与验收数据按原记录保留。
 
 共享组件与六个应用的 540 处 `view!` 已改为普通 Rust DOM/组件 builder；`#[component]` 属性宏保留。七份项目源码的语法扫描均为零视图宏，rustfmt、WASM Clippy 及六个优化版 WASM 构建已通过。11 份实际主机过程宏编译记录的 feature 均为 `csr`；Cargo metadata 的条件功能并集另行记录，不能充当实际编译清单。
 
@@ -53,6 +55,6 @@ xocs 公开图片/视频约 7.8 MB，旧 Vite 的 bundle 预算没有涵盖直�
 
 产品根目录执行 `cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- build --product-root .`；各项目文档列出 preview、Axum server 与原浏览器验收入口。框架/共享源码快照的 base_revision 指向最后改动浏览器 payload 的提交，逐文件摘要继续精确绑定全部字节；仅文档或服务端提交不再让同一快照失效。
 
-原始日志、精确 SHA 清单、第一次失败及私有 fixture 状态留在工作区 `.local/rust-native-web-2026-10-17/`，不提交生成物或私有状态。源码、工具、测试和本摘要进入各自的迁移分支。
+原始日志、精确 SHA 清单、第一次失败及私有 fixture 状态留在工作区 `.local/rust-native-web-2026-10-17/`，不提交生成物或私有状态。源码、工具、测试和本摘要先提交到各自的迁移分支，现已合并主分支。
 
-独立迁移分支：[xcss](https://github.com/isarmg/xcss/tree/feat/rust-native-web)、[xcos](https://github.com/isarmg/xcos/tree/feat/rust-native-web)、[xczs](https://github.com/isarmg/xczs/tree/feat/rust-native-web)、[xocs](https://github.com/isarmg/xocs/tree/feat/rust-native-web)、[xscs](https://github.com/isarmg/xscs/tree/feat/rust-native-web)、[xsos](https://github.com/isarmg/xsos/tree/feat/rust-native-web)、[xszs](https://github.com/isarmg/xszs/tree/feat/rust-native-web)、[xssi](https://github.com/isarmg/xssi/tree/feat/rust-native-web)。
+原迁移分支保留供复查：[xcss](https://github.com/isarmg/xcss/tree/feat/rust-native-web)、[xcos](https://github.com/isarmg/xcos/tree/feat/rust-native-web)、[xczs](https://github.com/isarmg/xczs/tree/feat/rust-native-web)、[xocs](https://github.com/isarmg/xocs/tree/feat/rust-native-web)、[xscs](https://github.com/isarmg/xscs/tree/feat/rust-native-web)、[xsos](https://github.com/isarmg/xsos/tree/feat/rust-native-web)、[xszs](https://github.com/isarmg/xszs/tree/feat/rust-native-web)、[xssi](https://github.com/isarmg/xssi/tree/feat/rust-native-web)。当前产品入口见[迁移总览](leptos-workspace-migration.md)。

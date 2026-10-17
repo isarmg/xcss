@@ -2,11 +2,26 @@
 
 迁移范围为 `xcos`、`xczs`、`xocs`、`xscs`、`xsos`、`xszs` 六个产品界面，以及公共 `xcss` 浏览器组件。产品后端继续使用 Axum，既有 API、数据库、认证和嵌入静态资源的发布方式保持兼容。
 
-## 分支约定
+2026-10-17，后续 Rust 原生改写已合并到八个相关仓库的 `main`：六个产品使用 xcss 统一分发的精简 Leptos CSR、普通 Rust 函数式视图及 Rust 生产前端构建；xssi 主分支包含相应前端来源与发布校验支持。本次合并不包含正式发行或线上部署。当前实现与验收见[集成式 CSR 与 Rust 视图](rust-native-csr.md)及[验证记录](rust-native-validation.md)。
 
-七个仓库分别使用 `feat/leptos-migration` 保存本次实现，`main` 保留 React 方案；当前本地 checkout 位于迁移分支。`xscs` 的迁移起点为已有 `feat/management-prep`，保留其五个管理与原生集成准备提交；其余仓库从当前 `main` 建立迁移分支。
+当前产品构建与测试入口：
 
-以下构建和验证命令针对迁移分支，在多仓工作区运行的示例以这些仓库的共同父目录为起点。分支提交与推送不包含合并到 `main`、创建发行标签或部署。
+| 产品 | main 维护文档 |
+| --- | --- |
+| xcos | [Rust 原生 Web 构建与测试](https://github.com/isarmg/xcos/blob/main/docs/rust-native-web.md) |
+| xczs | [Rust 原生 Web 构建与测试](https://github.com/isarmg/xczs/blob/main/docs/rust-native-web.md) |
+| xocs | [Rust 原生 Web 构建与测试](https://github.com/isarmg/xocs/blob/main/docs/rust-native-web.md) |
+| xscs | [Rust 原生 Web 构建与测试](https://github.com/isarmg/xscs/blob/main/docs/rust-native-web.md) |
+| xsos | [Rust 原生 Web 构建与测试](https://github.com/isarmg/xsos/blob/main/docs/rust-native-web.md) |
+| xszs | [Rust 原生 Web 构建与测试](https://github.com/isarmg/xszs/blob/main/docs/rust-native-web.md) |
+
+以下保留 2026-10-16 首次 Leptos 迁移的流程、分支安排和验收数据；其中 Node/Vite 构建命令描述当时实现，当前生产前端使用上述 Rust 构建入口。
+
+## 历史分支安排
+
+首次迁移时，七个仓库分别使用 `feat/leptos-migration` 保存实现，当时的 `main` 保留 React 方案，验收 checkout 位于迁移分支。`xscs` 的迁移起点为已有 `feat/management-prep`，保留其五个管理与原生集成准备提交；其余仓库从当时的 `main` 建立迁移分支。
+
+以下构建和验证命令针对当时的迁移分支，在多仓工作区运行的示例以这些仓库的共同父目录为起点。当时的分支提交与推送不包含合并到 `main`、创建发行标签或部署。
 
 ## 实现边界
 
@@ -41,7 +56,7 @@ python3 xcss/scripts/vendor-leptos.py --check
 
 验收包括 Rust 原生契约测试、严格 Clippy/rustfmt、构建脚本输入追溯测试，以及实际加载 WASM 的 Chromium/Firefox 浏览器用例。页面上的 `data-xcss-runtime="leptos"` 仅由 Rust 启动代码设置，不能仅凭 Vite 构建成功判断迁移完成。后台嵌入资源检查验证 WASM 魔数、精确字节与 application/wasm MIME，保留字体许可证及现有缓存/CSP规则。
 
-分别阅读：
+首次迁移记录分别位于：
 
 - [公共浏览器组件](leptos-web.md)
 - [媒体管理](https://github.com/isarmg/xcos/blob/feat/leptos-migration/docs/leptos-web.md)
@@ -58,7 +73,7 @@ python3 xcss/scripts/vendor-leptos.py --check
 
 压缩适配只用于静态 WASM，不涉及认证/API 响应。通用实现维护在 `xcss/scripts/leptos-assets.rs` 与 `xcss/web/leptos-assets.mjs`；`vendor-leptos.py --check` 同时验证六个独立仓库中的副本。
 
-迁移代码单独提交到各仓库的 `feat/leptos-migration`，`main` 保留 React 方案。分支提交与推送不触发本次线上部署，服务发行继续使用原发布流程。
+首次迁移代码单独提交到各仓库的 `feat/leptos-migration`，当时的 `main` 保留 React 方案。该阶段分支提交与推送没有触发线上部署，服务发行继续使用原发布流程。
 
 ## 依赖清单与审计
 

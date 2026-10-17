@@ -1,6 +1,6 @@
 # xcss
 
-xcss 是服务端与管理 Web 的公共基础库。本分支提供服务端 crate `xcss`、浏览器库 `xcss-web`、集成的精简 Leptos CSR 和 Rust Web 构建工具，由具体产品集成使用。`main` 保留 React 方案。
+xcss 是服务端与管理 Web 的公共基础库。`main` 提供服务端 crate `xcss`、浏览器库 `xcss-web`、集成的精简 Leptos CSR 和 Rust Web 构建工具，由具体产品集成使用。六个产品的主分支采用 Rust 函数式视图，继续使用 Axum 后端。
 
 ## 项目功能
 
@@ -12,7 +12,7 @@ xcss 是服务端与管理 Web 的公共基础库。本分支提供服务端 cra
 
 Rust 与 Web 构建仅支持 Linux x86_64 GNU（glibc）。部署后的管理页面可通过不同操作系统上的浏览器访问。
 
-## 本分支的 CSR 接入
+## 当前 CSR 接入
 
 框架与共享浏览器源码统一位于 `web/leptos`，通过 `scripts/vendor-leptos.py` 同步为产品内的独立源码快照。各产品保持 Axum 后端，只构建 CSR；普通 Rust DOM builder 可直接使用 rustfmt 和 Clippy。
 

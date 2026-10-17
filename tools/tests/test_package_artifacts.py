@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import io
 import os
 import sys
 import tempfile
+import tarfile
 import unittest
 from pathlib import Path
 
@@ -15,10 +17,43 @@ from xcss_package_artifacts import (  # noqa: E402
     PackagePolicyError,
     clean_dist,
     discover_packages,
+    _inspect_tarball,
 )
 
 
 class PackageArtifactTests(unittest.TestCase):
+    def test_tarball_binds_actual_artifact_bytes_and_public_exports(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory)
+            self.fixture(repository)
+            (repository / "LICENSE").write_text("Original license text\n")
+            package = discover_packages(repository)[0]
+            for mutation in (None, "bytes", "export", "extra", "license"):
+                archive_path = repository / "fixture.tgz"
+                manifest = dict(package.manifest)
+                if mutation == "export":
+                    manifest["exports"] = {".": "./dist/index.js"}
+                with tarfile.open(archive_path, "w:gz") as archive:
+                    contents = {"package/package.json": json.dumps(manifest).encode(), "package/LICENSE": (repository / "LICENSE").read_bytes(), **{
+                        "package/" + path.relative_to(repository).as_posix(): path.read_bytes()
+                        for path in package.check_build()
+                    }}
+                    if mutation == "bytes":
+                        contents["package/dist/index.js"] = b"export const tampered = true;"
+                    if mutation == "extra":
+                        contents["package/dist/old-react.js"] = b"export {};"
+                    if mutation == "license":
+                        contents["package/LICENSE"] = b"Replaced license"
+                    for name, data in contents.items():
+                        info = tarfile.TarInfo(name)
+                        info.size = len(data)
+                        archive.addfile(info, io.BytesIO(data))
+                if mutation is None:
+                    _inspect_tarball(package, archive_path, package.check_build())
+                else:
+                    with self.subTest(mutation=mutation), self.assertRaisesRegex(PackagePolicyError, "packed .*differ"):
+                        _inspect_tarball(package, archive_path, package.check_build())
+
     def fixture(self, repository: Path) -> Path:
         package = repository
         (package / "dist").mkdir(parents=True)

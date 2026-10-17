@@ -238,7 +238,7 @@ def check_builds(packages: Iterable[Package]) -> None:
         print(f"package manifest: passed {package.name} ({len(files)} artifacts)")
 
 
-def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
+def _run(command: list[str], cwd: Path, *, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(
             command,
@@ -247,7 +247,7 @@ def _run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env={key: value for key, value in os.environ.items() if key not in {"NODE_PATH", "NODE_OPTIONS"}},
+            env={**{key: value for key, value in os.environ.items() if key not in {"NODE_PATH", "NODE_OPTIONS"}}, **(extra_env or {})},
         )
     except subprocess.CalledProcessError as error:
         detail = (error.stderr or error.stdout or "").strip()
@@ -275,6 +275,14 @@ def _inspect_tarball(package: Package, tarball: Path, expected_files: tuple[Path
     expected_dist = {
         "package/" + path.relative_to(package.root).as_posix() for path in expected_files
     }
+    expected_contents = {
+        "package/" + path.relative_to(package.root).as_posix(): path.read_bytes()
+        for path in expected_files
+    }
+    for name in ("LICENSE", "README.md"):
+        path = package.root / name
+        if path.is_file():
+            expected_contents["package/" + name] = path.read_bytes()
     names: set[str] = set()
     packed_manifest: dict[str, Any] | None = None
     with tarfile.open(tarball, "r:gz") as archive:
@@ -293,6 +301,11 @@ def _inspect_tarball(package: Package, tarball: Path, expected_files: tuple[Path
             names.add(member.name)
             if not member.isfile() and not member.isdir():
                 raise PackagePolicyError(f"{tarball}: linked or special member {member.name!r}")
+            if member.isfile() and (member.name.startswith("package/dist/") or member.name in expected_contents):
+                extracted = archive.extractfile(member)
+                expected = expected_contents.get(member.name)
+                if expected is None or extracted is None or member.size != len(expected) or extracted.read(len(expected) + 1) != expected:
+                    raise PackagePolicyError(f"{tarball}: packed artifact bytes differ: {member.name}")
             if member.isfile() and member.name == "package/package.json":
                 extracted = archive.extractfile(member)
                 if extracted is None:
@@ -301,7 +314,7 @@ def _inspect_tarball(package: Package, tarball: Path, expected_files: tuple[Path
                 if len(data) > MAX_MANIFEST_BYTES:
                     raise PackagePolicyError(f"{tarball}: packed package.json is too large")
                 packed_manifest = json.loads(data.decode("utf-8"), object_pairs_hook=_unique_object)
-    missing = sorted(expected_dist - names)
+    missing = sorted((expected_dist | set(expected_contents)) - names)
     if missing:
         raise PackagePolicyError(f"{package.name}: tarball omits build artifacts {missing}")
     allowed_metadata = {
@@ -323,6 +336,9 @@ def _inspect_tarball(package: Package, tarball: Path, expected_files: tuple[Path
         raise PackagePolicyError(f"{package.name}: tarball has no package.json")
     if packed_manifest.get("name") != package.name or packed_manifest.get("version") != package.version:
         raise PackagePolicyError(f"{package.name}: packed identity differs from source manifest")
+    for field in ("type", "main", "types", "exports", "files", "os", "cpu", "libc"):
+        if packed_manifest.get(field) != package.manifest.get(field):
+            raise PackagePolicyError(f"{package.name}: packed {field} differs from source manifest")
     for section in (
         "dependencies",
         "devDependencies",
@@ -330,6 +346,8 @@ def _inspect_tarball(package: Package, tarball: Path, expected_files: tuple[Path
         "peerDependencies",
     ):
         dependencies = packed_manifest.get(section, {})
+        if dependencies != package.manifest.get(section, {}):
+            raise PackagePolicyError(f"{package.name}: packed {section} differs from source manifest")
         if isinstance(dependencies, dict):
             for dependency, requirement in dependencies.items():
                 if isinstance(requirement, str) and requirement.startswith("workspace:"):
@@ -392,21 +410,15 @@ def _install_smoke(packages: tuple[Package, ...], tarballs: tuple[Path, ...], co
     (consumer / "main.ts").write_text("\n".join(typed), encoding="utf-8")
     (consumer / "tsconfig.json").write_text(json.dumps({"compilerOptions": {
         "strict": True, "noEmit": True, "target": "ES2022", "module": "ESNext",
-        # Consumer declarations are checked through their public imports. Vite
-        # and the pinned Node types currently overlap on DOM globals, so the
-        # smoke follows the workspace policy and does not re-check dependency
-        # declaration internals.
-        "moduleResolution": "Bundler", "jsx": "react-jsx", "skipLibCheck": True,
+        "moduleResolution": "Bundler", "skipLibCheck": False,
         "lib": ["ESNext", "DOM", "DOM.Iterable"],
     }, "include": ["main.ts"]}), encoding="utf-8")
     _run(["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.json"], consumer)
-    browser_imports = [specifier for specifier in imports if not specifier.startswith("@xcss/web/web-toolchain")]
-    styles = [package.name + specifier[1:] for package in packages for specifier, targets in package.exports.items() if any(target.endswith(".css") for target in targets)]
-    source = [f"import * as entry{index} from {json.dumps(specifier)};\nconsole.log(entry{index});" for index, specifier in enumerate(browser_imports)]
-    source.extend(f"import {json.dumps(specifier)};" for specifier in styles)
-    (consumer / "app.js").write_text("\n".join(source), encoding="utf-8")
-    (consumer / "index.html").write_text('<!doctype html><html><body><script type="module" src="/app.js"></script></body></html>', encoding="utf-8")
-    _run(["node", "node_modules/vite/bin/vite.js", "build"], consumer)
+    # The same real Rust CSR browser suite must consume the installed archive's
+    # CSS, fonts and typed browser modules, rather than the checkout's dist.
+    for package in packages:
+        installed = consumer / "node_modules" / package.name
+        _run(["pnpm", "test:web:built"], package.root, extra_env={"XCSS_WEB_PACKAGE_ROOT": str(installed)})
     print(f"package install smoke: passed {len(packages)} packages and {len(resolutions)} exports")
 
 

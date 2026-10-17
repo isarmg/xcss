@@ -17,7 +17,7 @@
 ## 管理 Web
 
 - [HTTP 与认证生命周期](http-client.md)
-- [React Shell](../platform-specifications/admin-web-shell.md)与[原生 ESM](../platform-specifications/native-module-web.md)
+- [Rust CSR Shell](../platform-specifications/admin-web-shell.md)与[浏览器边界](../platform-specifications/native-module-web.md)
 - [工作区默认值](../admin-workspace.md)、[语言](../admin-web-language.md)、[账户设置](../web-account-settings.md)、[日期范围](../web-date-range.md)
 - [设计令牌](design-tokens.md)
 - [内嵌 Web 构建](embedded-web.md)与 [Rust 资源 API](../../src/web_assets/README.md)

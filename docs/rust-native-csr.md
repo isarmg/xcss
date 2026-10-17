@@ -14,7 +14,7 @@
 
 普通 Rust 视图保留实际 DOM builder，而非把完整界面藏入 HTML 字符串。这会改变旧视图宏的静态 inert-template 优化路径；类型检查与浏览器行为回归均需重新执行，最终 raw/gzip 字节应实测，不能假定语法更 Rust 就会更小或更快。固定版本的框架 helper 调用也增加了升级时的源码迁移工作。
 
-生产 Web 构建使用 `tools/web-build` 的 Rust CLI、Cargo 和 wasm-bindgen；资源解析、压缩、哈希、预载、预算、gzip 与资源清单均在 Rust 内执行。Node/Playwright 仍用于浏览器测试，历史 TSX fixture 可保留开发依赖。`wasm-bindgen` 的 JS glue、浏览器 DOM 绑定、现有角标绘制适配器和 xcos 的 HLS 引擎仍是浏览器边界，生产构建不依赖 Node/Vite 执行它们。
+生产 Web 构建使用 `tools/web-build` 的 Rust CLI、Cargo 和 wasm-bindgen；资源解析、压缩、哈希、预载、预算、gzip 与资源清单均在 Rust 内执行。Node/Playwright 仍用于真实浏览器测试，资源维护保留 TypeScript；旧界面夹具与其构建依赖已退役。`wasm-bindgen` 的 JS glue、浏览器 DOM 绑定、现有角标绘制适配器和 xcos 的 HLS 引擎仍是浏览器边界，生产构建不依赖 Node/Vite 执行它们。
 
 集成收益是统一版本和补丁、减少项目间漂移、可独立构建与严格追溯。成本是接管这份 fork 的升级回归、宏与 helper 的兼容性、更多显式 Rust 视图代码，以及 CSR 本来的 WASM 下载和初始化成本。集中存放源码本身不会减少编译器已消除的未引用代码。
 

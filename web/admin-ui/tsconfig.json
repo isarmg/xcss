@@ -11,12 +11,12 @@
     "declaration": true,
     "outDir": "../../dist/admin-ui",
     "rootDir": "src",
-    "jsx": "react-jsx",
     "isolatedModules": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true
   },
   "include": [
-    "src"
+    "src/server-corners.ts",
+    "src/server-corner-geometry.ts"
   ]
 }

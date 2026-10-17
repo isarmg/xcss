@@ -46,18 +46,18 @@
 
 ## 管理 Web竞态测试
 
-用可控Promise/fake fetch精确安排：
+通过真实WASM浏览器视图控制网络回复，精确安排：
 
 1. 两次登录重叠，第一成功晚于第二调用；
 2. 登录后立即退出，检查CSRF与修改操作顺序；
 3. 恢复会话进行中退出；
 4. 旧会话业务请求延迟401，新登录已成功；
 5. 多组件并发恢复会话只fetch一次；
-6. React 钩子卸载或client替换后旧Promise完成；
-7. 退出网络失败时 UI 使用 `anonymous_logout_unconfirmed`，关闭本地授权并保留私有撤销快照供主动重试；
+6. 账号视图卸载后密码清空、迟到请求不得覆写新的业务上下文；
+7. 退出网络失败时 UI 使用 `AuthPhase::LogoutUnconfirmed`，关闭本地授权并保留私有撤销快照供主动重试；
 8. 运行时校验失败不会发布会话。
 
-只用同步mock会漏掉该软件包最重要的价值。
+测试必须证明浏览器实际取得并执行当前WASM；共享夹具通过资源安装根验证真实归档。
 
 ## 合同测试
 
@@ -82,7 +82,7 @@ violation、完整性诊断、checkpoint busy/incomplete、元数据 DDL/column/
 - linked dist/manifest/export；
 - tar absolute/parent/backslash/duplicate/link/special member；
 - 软件包意外src/test与缺导出入口；
-- offline peer解析；
+- 独立安装包全部导出解析及严格TS；
 - 发行 path/mode/size/hash/extra/missing drift；
 - hash过程中替换inode、增长或改变mtime；
 - tree/file/count/manifest上限在超限时尽早失败；

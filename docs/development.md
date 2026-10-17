@@ -8,6 +8,8 @@
 
 ```sh
 rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
+rustup target add wasm32-unknown-unknown
+cargo install --locked wasm-bindgen-cli --version 0.2.129
 node --version
 pnpm --version
 pnpm install --frozen-lockfile --ignore-scripts
@@ -36,7 +38,7 @@ python3 scripts/package-artifacts.py smoke
 git diff --check
 ```
 
-`pnpm test` 从构建后的 dist 执行测试；`test:web` 使用 Playwright 的 Chromium/Firefox，需要已安装对应浏览器及系统依赖。`smoke` 生成真实 tgz，在独立目录安装精确 peers，验证导出、TypeScript 和 Vite，准备依赖时可联网。
+`pnpm test` 从构建后的 dist 执行测试；`test:web` 使用真实 Rust CSR 示例和 Playwright 的 Chromium/Firefox，需要已安装对应浏览器及系统依赖。`smoke` 生成真实 tgz，在独立目录安装并验证导出、TypeScript 和同一 CSR 浏览器套件；CSS、字体与浏览器模块来自安装的归档。准备依赖时可联网。
 
 ## 生成 Web 归档
 
@@ -46,7 +48,7 @@ git diff --check
 python3 scripts/package-artifacts.py release --output release/npm
 ```
 
-产物为 `release/npm/xcss-web-1.0.0.tgz`，可用于本地产品接入验证。正式资产的源码绑定、标签和回下载检查见[发行工具操作](operations.md)。
+产物为 `release/npm/xcss-web-2.0.0.tgz`，可用于本地产品接入验证。Web 发行标签为 `web-v2.0.0`，与原生 `v1.0.0` 独立。正式资产的源码绑定、标签和回下载检查见[发行工具操作](operations.md)。
 
 ## 验证实际消费者
 

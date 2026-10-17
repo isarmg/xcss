@@ -1,37 +1,11 @@
 # 当前管理员 Web 运行形态
 
-产品通过 `createXcssAdminApplication({ product, navigation, routes, client? })` 提供产品身份、同站导航和业务内容。
-可传入唯一共享管理员 client；未传时由 Shell 创建。业务通过 `useAdminApplication()` 取得 client、已认证
-会话和有界 `notify`。认证数据仅保存在 admin-web 内存中，不放入浏览器存储。
-可选的 `loginLandingHref` 是经校验的本地链接，仅在管理员显式登录成功后替换当前地址；恢复会话和刷新页面保留当前深链接。
+公共浏览器 crate `xcss-web` 采用 CSR 和普通 Rust 函数式视图。`AdminShell` 接收 `product`、可选 `landing` 和 `ChildrenFn`，拥有登录、会话恢复、退出、主题、语言、通知和跳过导航入口。业务内容与导航状态由产品提供，`HeaderNavigation` 和 `HeaderActions` 将内容挂入共享页头。
 
-Shell 拥有登录、会话恢复/重试、退出、导航、跳过导航链接、主题切换、错误边界和通知，不提供诊断入口或面板。
-登录期间表单保持挂载，防止失败提示丢失；密码失败后清空并恢复焦点。对外仅显示固定安全提示及校验后的请求 ID，
-不显示 error.message、stack 或任意内部状态 JSON。管理 Web 不主动请求诊断接口；服务运行所需的健康检查不受影响。
+认证与 CSRF 仅保存在 WASM 内存。初始恢复会话时显示不透明启动状态；成功后呈现工作区，401 后显示登录。服务端撤销未确认时清除本地授权、保留明确警告与主动重试入口。登录失败清除密码，只呈现固定安全提示和校验后的请求 ID。恢复会话保留当前深链接；`landing` 仅用于显式登录成功后的本地地址。
 
-`@xcss/web/admin-ui` 提供当前 UI 原语。Dialog 使用 native modal，并明确封闭键盘 Tab 循环、支持 Escape
-和恢复原焦点。危险确认默认聚焦取消。Button 默认 type=button，IconButton 强制可访问名称。
-通知最多五条，可由键盘关闭，位于页头下方正常文档流中，不叠加遮挡业务按钮或键盘焦点。
-Table 可键盘横向滚动；业务 loading/error 有可见文本与正确 live/alert 语义。初始会话和核心字体启动阶段使用不暴露恢复细节的不透明启动界面，准备完成后才挂载登录页或已认证工作区。
+`Dialog` 使用原生 modal，限制 Tab 循环、支持 Escape，关闭后恢复触发元素焦点。通知最多五条、每条最多 512 字符、使用文本节点，支持主动关闭和定时清理。通知在正常文档流中，不覆盖业务按钮。
 
-React 产品统一导入 design-tokens 的 tokens.css、tokens.dark.css、reset.css、accessibility.css，
-web-fonts/fonts.css 及 admin-ui/styles.css。登录、全局 Shell 与字体通过这些包提供。
-主题初始采用系统亮暗偏好，登录页和工作区使用同一持久化主题选择；图标尺寸均为 `1em`。人物入口进入产品正常菜单路由中的 `AccountPage`，不打开弹窗，也不显示选中标记。
-遵守 forced-colors 和 reduced-motion；业务布局仍由产品负责。空 `navigation` 允许产品通过 `HeaderNavigation` 提供顶部页面入口。
+样式、完整字体与角标绘制适配器从独立版本的 `@xcss/web` 资源包导入。默认内容块外观可通过 `html[data-xcss-appearance]` 替换；字体启动、认证合同和无障碍要求保持共同边界。`web/xcss-web/startup.js` 配合 Rust 字体等待逻辑，加载失败或 30 秒未完成时显示可见错误和主动重载按钮，不无限重试或伪造 ready。
 
-默认视觉外观采用 Union 内容块：登录卡片宽度上限 380px、3:2、六行布局；
-业务摘要使用比例卡片，长表单、详情、表格使用可伸展面板，不能裁掉功能或错误信息。
-`@xcss/web/admin-ui/styles.css` 自动加载此外观，不要求消费者另行选择。
-消费者允许自行设计其他外观：在 `html` 设置 `data-xcss-appearance="custom"`
-（或任意非 `content-blocks` 的明确名称）退出默认外观，再加载自己的样式。
-视觉替换不授权复制认证实现、改变权限合同或降低无障碍验收。
-默认字体独立于外观管理，切换外观不自动替换字体。
-详见 [外观接入及不可变包分发说明](../../web/admin-ui/CONTENT-BLOCKS.md)。
-
-`@xcss/web/web-toolchain/vite` 和 `@xcss/web/web-toolchain/tsconfig.json` 是唯一工具链入口，
-admin-web 负责认证客户端。构建关闭 source maps，对每个产物执行硬性大小预算（默认 512 KiB），超限失败。
-输出目录为 dist，资源由 Vite 生成内容哈希文件名，React/React DOM 去重。
-
-验收命令：`pnpm test`、`pnpm test:web`。浏览器套件在 Chromium 和 Firefox 检查登录/退出、请求 ID、
-焦点循环、错误边界、不提供诊断入口、主题和通知，并对 360px 移动宽度的两种主题运行 axe WCAG AA 与横向溢出检查。
-测试只代表共享运行形态；每个消费者仍须运行其业务和独立构建验收，不能据此宣称全产品改造完成。
+真实示例见 [`examples/csr.rs`](../../web/xcss-web/examples/csr.rs)。`pnpm test:web` 在 Chromium 和 Firefox 实际编译并执行此 WASM，验证字体、认证、账号、键盘、主题、通知与移动 WCAG AA；像素级角标测试也使用正式构建资源。产品仍须独立验证业务及真实 Axum HTTP、Cookie、TLS 行为。

@@ -30,25 +30,24 @@
 | Rust 测试 | `xcss::testkit` | 供测试使用的公共安全夹具与辅助机制 |
 | Rust Web 资源 | `xcss::web_assets` | 确定性内嵌清单、SHA-256、HTTP 与开发目录提供器 |
 | Web 合同 | `@xcss/web/contracts` | TypeScript 类型、运行时校验、JSON Schema 和夹具 |
-| Web 传输 | `@xcss/web/http-client` | 同源、有界、可取消的 JSON 请求 |
-| Web 认证 | `@xcss/web/admin-web` | 内存会话、竞态安全认证客户端与 React 钩子 |
-| Web 管理外壳 | `@xcss/web/admin-shell` | 共享登录、导航、账号设置及业务区域组合 |
-| Web 组件 | `@xcss/web/admin-ui` | 管理组件、可访问性、日期控件与内容块 |
-| Web 样式 | `@xcss/web/design-tokens` | 限定作用域的设计和可访问性原语 |
-| Web 字体 | `@xcss/web/web-fonts` | 随发行包提供的字体及预加载机制 |
-| Web 构建 | `@xcss/web/web-toolchain` | 精确工具链、TypeScript/Vite 配置和服务端构建编排 |
+| Rust 浏览器 | `xcss_web::{api,components,i18n,theme}` | 独立 WASM CSR、认证、管理外壳与纯 Rust 函数式视图 |
+| Web 样式 | `@xcss/web/design-tokens`、`admin-ui/*.css` | 限定作用域的设计、表单、内容块及可访问性资源 |
+| Web 字体 | `@xcss/web/web-fonts` | 完整字体、样式、来源元数据和原许可证 |
+| Web 角标 | `@xcss/web/admin-ui/server-corners` | 显式启动和清理的窄 DOM 绘制适配器 |
+| Rust Web 构建 | `tools/web-build` | 固定 Rust/wasm-bindgen、独立源码快照与发行输入核验 |
 | 发布 | Python tools/scripts | 软件包归档、状态/发行身份、release-tree 和工作流校验 |
 
-这些 Rust 模块属于一个 crate，Web 入口属于一个 npm 包，各内部模块不独立发布。
+服务端 `xcss` 与浏览器 `xcss-web` 是独立 Cargo package；Web 资源由独立版本的 `@xcss/web` 单包分发，内部资源模块不独立发布。
 
 ## 目录逐层解释
 
 ```text
-Cargo.toml           唯一 Rust package xcss 的身份、外部依赖与 lint
+Cargo.toml           服务端 Rust package xcss 的身份、外部依赖与 lint
 src/lib.rs           全 crate Linux AMD64 GNU 编译门禁与公开模块
-src/<module>/        内部实现、fixture、单元测试（没有子 Cargo.toml）
+src/<module>/        服务端内部实现、fixture、单元测试
+web/xcss-web/        独立 WASM crate、内部核心及过程宏源码快照
 
-package.json         唯一 @xcss/web 包的 exports、peer、engine 和 platform 约束
+package.json         唯一 @xcss/web 包的 exports、engine 和 platform 约束
 web/<module>/
 ├─ src/              TypeScript 源码
 ├─ test/             从根 dist/<module> 导入的测试

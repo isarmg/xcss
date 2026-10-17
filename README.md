@@ -33,30 +33,30 @@ xcss-web = { path = "vendor/xcss-web", default-features = false, features = ["cs
 cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- build --product-root .
 ```
 
-生产前端构建不需要 Node/Vite。浏览器测试仍使用 Node/Playwright；原 npm 包、历史 TSX 和发布流程保留各自的工具要求。详见 [集成式 CSR 与 Rust 视图](docs/rust-native-csr.md)、[类型化 HTTP 合同](docs/xcss-web-typed-http.md)及 [Rust 构建工具](tools/web-build/README.md)。
+生产前端构建不需要 Node/Vite。浏览器测试仍使用 Node/Playwright；Web 2 资源包构建使用 TypeScript，独立发行流程验证真实 CSR 浏览器。详见 [集成式 CSR 与 Rust 视图](docs/rust-native-csr.md)、[类型化 HTTP 合同](docs/xcss-web-typed-http.md)及 [Rust 构建工具](tools/web-build/README.md)。
 
 ## xcss-web 来源
 
 `xcss-web` 的内部核心与过程宏基于 Leptos 0.8.19 裁剪、修改并整合；原 MIT 许可证及版权通知保留。完整上游来源、原始清单与修改记录保存在 [核心 README](web/xcss-web/vendor/xcss-web-core/README.md) 和 [宏 README](web/xcss-web/vendor/xcss-web-macro/README.md)，并由逐文件 SHA-256 清单绑定。独立第三方依赖保留真实包名及许可证；本仓库自有共享组件沿用 Apache-2.0。
 
-## 已发布 1.0.0 的接入
+## 原生与 Web 的接入
 
-本项目通过依赖接入，不单独运行服务。以下示例使用 1.0.0 的不可变发行输入。Rust 消费者在 `Cargo.toml` 固定精确版本与完整发布修订：
+本项目通过依赖接入，不单独运行服务。Rust 原生版本为 1.0.0，Web 公共资源版本独立为 2.0.0。Rust 消费者在 `Cargo.toml` 固定精确版本与完整发布修订：
 
 ```toml
 [dependencies]
 xcss = { git = "https://github.com/isarmg/xcss.git", rev = "<v1.0.0 对应的完整 40 位 Git 修订>", version = "=1.0.0" }
 ```
 
-需要管理 Web 的产品安装同版发行包，并提交依赖锁文件：
+需要共享 Web 资源的产品安装独立 Web 发行包，并提交含精确 URL 和 SHA-512 的依赖锁文件：
 
 ```sh
-npm install --save-exact https://github.com/isarmg/xcss/releases/download/v1.0.0/xcss-web-1.0.0.tgz
+npm install --save-exact https://github.com/isarmg/xcss/releases/download/web-v2.0.0/xcss-web-2.0.0.tgz
 ```
 
-通过 `xcss::<module>`、`@xcss/web/<module>` 引入能力，在产品根目录维护 `xcss-product.toml`；React/Vite 等 peer 依赖按包内精确版本安装。完成产品构建后，随该产品部署。
+通过 `xcss::<module>`、`@xcss/web/<module>` 引入能力，在产品根目录维护 `xcss-product.toml`；Web 2 无运行时 npm 依赖或 peer 依赖，视图使用 Rust CSR。完成产品构建后，随该产品部署。
 
-## 已发布 npm 包的编译与归档
+## Web 资源包的编译与归档
 
 准备 Rust `1.99.0`、Node `26.7.0`、pnpm `10.34.6`、Python 3 和 C 编译工具链，在仓库根目录执行（`release/npm/` 须为空或尚未创建）：
 

@@ -9,27 +9,31 @@
 `package.json#files=["dist"]`限制发布面，导出入口限制公共入口。README、LICENSE和软件包元数据由npm
 规则随包携带；src/test/node_modules不进入。若一个导出入口只在工作区能解析，它不算实现。
 
-## 对等依赖所有权
+## 依赖所有权
 
-contracts、http-client、admin-web 等均为同一 `@xcss/web` 包的内部模块，通过公开子路径自引用。
-它们没有独立 peer、版本或发行归档。外部 React/Vite 依赖保留精确 peer，消费者在自己的锁文件中固定。
+contracts、design-tokens、字体及样式均为同一 `@xcss/web` 包的内部模块，通过公开子路径自引用。
+Web 2 不再发行 React 组件、Vite 插件或客户端 HTTP 包；无运行时 npm 依赖或 peer 依赖。
 源码与发布清单均不得含内部 `workspace:`、`file:` 或独立 `@xcss/*` 包依赖。
 
 ## 发行资产怎样生成
 
 ```text
-工作树完全干净 + tag精确指向HEAD
-├─ package_release -> 1个 xcss-web-1.0.0.tgz
+原生：工作树完全干净 + v1.0.0精确指向HEAD
 ├─ deterministic tool bundle
 ├─ state-contract.json
 ├─ hash(state contract) -> release-identity.json
-├─ build-inventory.json
+├─ build-inventory.json（Rust工具链/Cargo锁）
 ├─ SHA256SUMS
 └─ release-tree.json（在artifacts树外）
+
+Web：工作树完全干净 + web-v2.0.0精确指向HEAD
+├─ package_release -> 1个 xcss-web-2.0.0.tgz
+├─ xcss-web-release.json（完整修订、版本、URL、SHA-256及SHA-512）
+└─ SHA256SUMS
 ```
 
 xcss无runtime状态，所以状态合同的schema为null，资源/锁/外部要求/companion为空。identity target
-固定为 `x86_64-unknown-linux-gnu`。xcss 的 Rust crate 和 npm 构建进程均受同一服务端平台边界约束。
+固定为 `x86_64-unknown-linux-gnu`。Web 版本和标签独立于原生 crate；Web 2 公共 API 的删除不会重用历史 1.0.0 资产。
 
 ## 确定性工具归档
 
@@ -51,6 +55,6 @@ verifier拒绝absolute/parent/backslash/NUL path、link/special file、超限树
 
 ## 发布证据
 
-保留：完整commit、annotated 标签、workflow run、工具链、两个lock hash、软件包归档 hash、发行身份、
-状态合同、inventory、release-tree、消费者最终commit和验证结果。不要把npm/GitHub 令牌、产品Secret、
+保留：完整commit、annotated 标签、workflow run、工具链、各目标的权威lock hash、软件包归档 hash、对应发行描述符、
+消费者最终commit和验证结果。原生另保留状态合同、inventory、release-tree。不要把npm/GitHub 令牌、产品Secret、
 真实数据库或用户信息放入证据。

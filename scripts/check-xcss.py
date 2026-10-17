@@ -14,12 +14,14 @@ from xcss_policy import (  # noqa: E402
     CURRENT_VERSION,
     XcssPolicyError,
     check_repository,
+    check_native_repository,
 )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="check-xcss.py")
     parser.add_argument("--version", action="version", version=f"%(prog)s {CURRENT_VERSION}")
+    parser.add_argument("--native", action="store_true", help="check the native crate without requiring the Web package")
     parser.add_argument(
         "--root",
         type=Path,
@@ -27,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     try:
-        check_repository(arguments.root)
+        (check_native_repository if arguments.native else check_repository)(arguments.root)
         print(f"xcss policy: passed {arguments.root}")
         return 0
     except (OSError, XcssPolicyError) as error:

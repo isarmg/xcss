@@ -6,7 +6,7 @@
 消费者可以设置 `<html data-xcss-appearance="custom">`（或其他自定义名称）退出，
 再在基础样式之后加载自己的 CSS；所有内容块规则及色板都会退出作用域。
 不替换认证组件，不影响 API、会话、权限或默认字体。单独的
-`@xcss/web/admin-ui/content-blocks.css` 导出也可用于原生 ESM 页面。
+`@xcss/web/admin-ui/content-blocks.css` 导出也可用于产品自有样式入口。
 
 登录复用当前 AdminShell 的语义表单，呈现 380px、3:2、六行卡片、透明输入和文字操作。
 标题与产品标识仍向辅助技术提供；错误行可以滚动，完整请求 ID 不会被删除。
@@ -15,8 +15,8 @@
 ## 系统、浏览器与圆角策略
 
 仅支持当前最新稳定版浏览器和原生系统系列。升级时同时更新构建与 CI，
-不增加旧浏览器探测、polyfill 或旧圆角兼容层。Web 构建采用 `esnext`，
-关闭 module-preload polyfill。
+不增加旧浏览器探测、polyfill 或旧圆角兼容层。生产Web构建使用Rust与wasm-bindgen，保留浏览器原生能力，
+不注入module-preload polyfill。
 
 服务端入口显式调用 `startServerCorners(document)`，使用 Mac mini 轮廓。
 普通控件、面板、提示和弹窗分别使用 27、42、48、54px 的角边界范围；

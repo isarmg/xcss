@@ -23,18 +23,8 @@ xcss 的产品接入由 `xcss-product.toml` 声明。产品的业务配置字段
 
 ## Web 工作区
 
-`createXcssAdminApplication` 可省略 `workspace` 使用默认外观，也可提供部分选项：
+当前管理工作区通过 Rust `AdminShell`、`HeaderNavigation`、`HeaderActions` 组合产品视图。`html[data-xcss-appearance="content-blocks"]` 选择默认外观，产品可通过其他明确标识和自己的样式替换。实例名称验证的上限参数为1–32，诊断入口不出现在管理UI。
 
-| 选项 | 默认值 / 可选值 |
-|---|---|
-| `appearance` | `content-blocks`；可使用自己的小写外观标识 |
-| `selection` | `underline`；也可 `custom` |
-| `headerControls` | `icons`；也可 `text` |
-| `fontFamily` | 内置 Maple 字体栈；可提供自有字体栈与资产 |
-| `instanceNameMaxCharacters` | `32`；允许 `1`–`32` |
-| `diagnostics` / `showVersion` | 固定 `false` |
-| `navigationPlacement` / `headerIconSize` | 固定 `header` / `1em` |
+语言按 URL 参数、保存偏好和浏览器语言选择，支持 `zh-CN` 与 `en`；主题默认跟随系统，用户选择可保存。规则见[语言](admin-web-language.md)与[工作区](admin-workspace.md)。
 
-详见[工作区配置](admin-workspace.md)。语言按 URL 参数、保存偏好、浏览器语言选择，支持 `zh-CN` 与 `en`；主题默认跟随系统，用户选择可保存。规则见[语言](admin-web-language.md)与[账号和主题](web-account-settings.md)。
-
-React 构建的单资源预算默认 512 KiB，`maxAssetBytes` 接受 `1`–`67108864` 字节的安全整数；原生 ESM 默认 256 KiB。完整 WOFF/WOFF2 字体使用独立 16 MiB 预算，JS/CSS 和其他资源预算不变。生产资源通过[内嵌构建](reference/embedded-web.md)与服务端一起交付。
+生产资源通过 Rust `tools/web-build` 构建，并由[内嵌资源](reference/embedded-web.md)与服务端一同交付。资源预算与当前WASM、字体和媒体桶约束以构建器声明及实际清单验证为准，不能沿用旧构建工具的配置API。

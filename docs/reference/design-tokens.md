@@ -22,7 +22,7 @@
 <div id="root" data-xcss-scope data-theme="dark"></div>
 ```
 
-主题是light时可以不设置`data-theme`或使用产品定义的当前状态。设计令牌本身不读取系统偏好或浏览器 storage；admin-shell 负责系统主题与 `sarmg:theme` 的选择，
+主题是light时可以不设置`data-theme`或使用产品定义的当前状态。设计令牌本身不读取系统偏好或浏览器 storage；Rust theme 模块负责系统主题与 `sarmg:theme` 的选择，
 产品决定主题来源和持久化。
 
 ## 作用域内的重置样式

@@ -1,7 +1,7 @@
 # 单管理员账户自助更新
 
 xcss 管理面只有一个活动管理员。唯一浏览器账户修改接口是
-`POST /api/v1/platform/administrators/self`，由 Core、Store、Axum/Hyper 和 admin-web 共同实现。
+`POST /api/v1/platform/administrators/self`，由 Core、Store、Axum/Hyper 和 xcss-web::api 共同实现。
 
 ```json
 {"username":"admin","current_password":"current password","new_password":"new password"}

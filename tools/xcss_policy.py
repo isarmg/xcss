@@ -12,6 +12,7 @@ from typing import Any
 
 
 CURRENT_VERSION = "1.0.0"
+CURRENT_WEB_VERSION = "2.0.0"
 NODE_VERSION = "26.7.0"
 PNPM_VERSION = "10.34.6"
 RUST_VERSION = "1.99.0"
@@ -20,13 +21,9 @@ APACHE_2_LICENSE_SHA256 = (
 )
 WEB_TOOLCHAIN_DEV_DEPENDENCIES = {
     "@types/node": "26.6.4",
-    "@types/react": "19.3.0",
-    "@types/react-dom": "19.3.0",
-    "@vitejs/plugin-react": "6.1.2",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
     "typescript": "7.0.2",
-    "vite": "8.3.3",
+    "@playwright/test": "1.63.0",
+    "@axe-core/playwright": "4.13.0",
 }
 SOURCE_REVISION = re.compile(r"[0-9a-f]{40}")
 KNOWN_PACKAGES = {"xcss", "@xcss/web"}
@@ -88,7 +85,7 @@ def _exact_keys(value: dict[str, Any], expected: set[str], context: str) -> None
         )
 
 
-def check_dependency_boundaries(root: Path) -> None:
+def check_dependency_boundaries(root: Path, *, include_web: bool = True) -> None:
     """A server monolith depends only on external libraries, never another project."""
     root = root.resolve()
     cargo = _toml(root / "Cargo.toml")
@@ -112,6 +109,8 @@ def check_dependency_boundaries(root: Path) -> None:
         for patches in manifest.get("patch", {}).values():
             inspect(patches, path)
         inspect({name.split(":", 1)[0]: value for name, value in manifest.get("replace", {}).items()}, path)
+    if not include_web:
+        return
     for path in [root / "package.json", *sorted((root / "web").glob("*/package.json")), *sorted((root / "packages").glob("*/package.json"))]:
         manifest = _json(path)
         for section in ("dependencies", "devDependencies", "optionalDependencies", "peerDependencies"):
@@ -163,8 +162,6 @@ def check_web_lockfile(root: Path) -> None:
     snapshots = entries("snapshots")
     required = {
         "typescript@7.0.2": ("@typescript/typescript-linux-x64", "7.0.2"),
-        "rolldown@1.2.12": ("@rolldown/binding-linux-x64-gnu", "1.2.12"),
-        "lightningcss@1.33.0": ("lightningcss-linux-x64-gnu", "1.33.0"),
     }
     for parent, (native, version) in required.items():
         native_package = packages.get(f"{native}@{version}", "")
@@ -178,7 +175,7 @@ def check_web_lockfile(root: Path) -> None:
             raise XcssPolicyError(f"{path}: locked native dependencies are incomplete for {parent}")
 
 
-def check_versions(root: Path) -> None:
+def check_native_versions(root: Path) -> None:
     read_audited_root_license(root / "LICENSE")
     cargo = _toml(root / "Cargo.toml")
     package = cargo.get("package", {})
@@ -191,9 +188,16 @@ def check_versions(root: Path) -> None:
     gate = (root / "src/lib.rs").read_text()
     if not all(token in gate for token in ('target_os = "linux"', 'target_arch = "x86_64"', 'target_env = "gnu"', 'compile_error!')):
         raise XcssPolicyError("the whole xcss crate must enforce the Linux AMD64 GNU target")
+    if _toml(root / "rust-toolchain.toml").get("toolchain", {}).get("channel") != RUST_VERSION:
+        raise XcssPolicyError("Rust toolchain differs from policy")
+
+
+def check_web_versions(root: Path) -> None:
     manifest = _json(root / "package.json")
-    if manifest.get("name") != "@xcss/web" or manifest.get("version") != CURRENT_VERSION or manifest.get("private") is True:
-        raise XcssPolicyError(f"package.json must publish the one @xcss/web {CURRENT_VERSION} package")
+    if manifest.get("name") != "@xcss/web" or manifest.get("version") != CURRENT_WEB_VERSION or manifest.get("private") is True:
+        raise XcssPolicyError(f"package.json must publish the one @xcss/web {CURRENT_WEB_VERSION} package")
+    if manifest.get("license") != "Apache-2.0":
+        raise XcssPolicyError("package.json license differs from the audited root LICENSE")
     for key, expected in {"os": ["linux"], "cpu": ["x64"], "libc": ["glibc"]}.items():
         if manifest.get(key) != expected:
             raise XcssPolicyError(f"package.json {key} differs from the server build boundary")
@@ -204,10 +208,29 @@ def check_versions(root: Path) -> None:
     for dependency, expected in WEB_TOOLCHAIN_DEV_DEPENDENCIES.items():
         if manifest.get("devDependencies", {}).get(dependency) != expected:
             raise XcssPolicyError(f"package.json {dependency} must be exactly {expected}")
+    if set(manifest.get("devDependencies", {})) != set(WEB_TOOLCHAIN_DEV_DEPENDENCIES):
+        raise XcssPolicyError("package.json contains an unreviewed Web development dependency")
+    if any(manifest.get(key) for key in ("dependencies", "optionalDependencies", "peerDependencies", "bin")):
+        raise XcssPolicyError("Web assets must not require a runtime package, peer framework or executable")
+    removed = ("web-toolchain", "http-client", "admin-web", "admin-shell")
+    if any(any(part in specifier.split("/") for part in removed) for specifier in manifest.get("exports", {})):
+        raise XcssPolicyError("package.json exports a removed React or Vite API")
     if (root / ".node-version").read_text().strip() != NODE_VERSION:
         raise XcssPolicyError(".node-version differs from policy")
-    if _toml(root / "rust-toolchain.toml").get("toolchain", {}).get("channel") != RUST_VERSION:
-        raise XcssPolicyError("Rust toolchain differs from policy")
+
+
+def check_versions(root: Path) -> None:
+    check_native_versions(root)
+    check_web_versions(root)
+
+
+def check_native_repository(root: Path) -> None:
+    root = root.resolve(strict=True)
+    if root == Path(root.anchor):
+        raise XcssPolicyError("refusing to check a filesystem root")
+    check_dependency_boundaries(root, include_web=False)
+    check_server_dependency_targets(root)
+    check_native_versions(root)
 
 
 def check_repository(root: Path) -> None:

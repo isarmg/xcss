@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -12,10 +13,12 @@ sys.path.insert(0, str(TOOLS))
 
 from xcss_policy import (  # noqa: E402
     CURRENT_VERSION,
+    CURRENT_WEB_VERSION,
     XcssPolicyError,
     check_dependency_boundaries,
     check_server_dependency_targets,
     check_web_lockfile,
+    check_native_repository,
 )
 
 
@@ -130,15 +133,22 @@ class CleanBuildDependencyTests(unittest.TestCase):
 
     def test_missing_native_binary_metadata_is_rejected_without_node_modules(self) -> None:
         lock = (TOOLS.parent / "pnpm-lock.yaml").read_text()
-        for declaration in (
-            "      '@typescript/typescript-linux-x64': 7.0.2\n",
-            "      '@rolldown/binding-linux-x64-gnu': 1.2.12\n",
-            "      lightningcss-linux-x64-gnu: 1.33.0\n",
-        ):
+        for declaration in ("      '@typescript/typescript-linux-x64': 7.0.2\n",):
             self.assertIn(declaration, lock)
             (self.root / "pnpm-lock.yaml").write_text(lock.replace(declaration, ""))
             with self.assertRaisesRegex(XcssPolicyError, "locked native dependencies"):
                 check_web_lockfile(self.root)
+
+    def test_native_and_web_public_versions_are_independent(self) -> None:
+        self.assertEqual(CURRENT_VERSION, "1.0.0")
+        self.assertEqual(CURRENT_WEB_VERSION, "2.0.0")
+
+    def test_native_release_policy_does_not_require_npm_manifest_or_lock(self) -> None:
+        for name in ("Cargo.toml", "LICENSE", "rust-toolchain.toml", "src/lib.rs"):
+            destination = self.root / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(TOOLS.parent / name, destination)
+        check_native_repository(self.root)
 
 
 if __name__ == "__main__":

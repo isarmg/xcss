@@ -1,6 +1,6 @@
 # Rust 原生 Web 构建工具
 
-这个独立 Cargo workspace 为现有 xcss-web CSR 项目生成 Axum 可嵌入的静态资源。生产构建只执行锁定的 Cargo 和 wasm-bindgen；不执行 Node、Vite、Python，不下载 CDN 运行时。现有 React 包与 Playwright 测试仍可独立保留。
+这个独立 Cargo workspace 为现有 xcss-web CSR 项目生成 Axum 可嵌入的静态资源。生产构建只执行锁定的 Cargo 和 wasm-bindgen；不执行 Node、Vite、Python，不下载 CDN 运行时。Node/Playwright 保留为真实 WASM 浏览器测试工具；共享 Web 资源包不包含旧界面和构建运行时。
 
 ```sh
 cargo run --locked --manifest-path tools/web-build/Cargo.toml -- build --product-root . --offline

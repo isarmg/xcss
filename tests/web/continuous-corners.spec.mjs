@@ -159,7 +159,7 @@ const dropdownFrame = async page => {
 };
 
 test("dropdown foreground keeps the whole grey border above first/last selected and hovered rows", async ({ browser }, info) => {
-  const context = await browser.newContext({ baseURL: "http://127.0.0.1:4189", deviceScaleFactor: 2 });
+  const context = await browser.newContext({ baseURL: info.project.use.baseURL, deviceScaleFactor: 2 });
   const page = await context.newPage();
   try {
     const panel = await dropdownFrame(page), original = await panel.boundingBox();
@@ -190,7 +190,7 @@ test("dropdown foreground keeps the whole grey border above first/last selected 
 
 test("fractional dropdown borders have equal measured width at DPR1 and DPR2", async ({ browser }, info) => {
   for (const dpr of [1,2]) {
-    const context = await browser.newContext({ baseURL: "http://127.0.0.1:4189", deviceScaleFactor: dpr });
+    const context = await browser.newContext({ baseURL: info.project.use.baseURL, deviceScaleFactor: dpr });
     const page = await context.newPage();
     try {
       const panel = await dropdownFrame(page);
@@ -374,8 +374,8 @@ test("the actual shared account entry retains its circular shape under the serve
   await page.goto("/");
   const account = page.locator(".xcss-account-entry");
   await expect(account).toBeVisible();
-  await page.evaluate(() => window.serverCorners = window.startServerCorners(document));
-  await expect(page.locator(".xcss-button").filter({ hasText: "Open modal" })).toHaveAttribute("data-xcss-server-corner-state", "paint");
+  await page.evaluate(async () => { const { startServerCorners } = await import("/dist/admin-ui/server-corners.js"); window.serverCorners = startServerCorners(document); });
+  await expect(page.locator(".xcss-button").filter({ hasText: "Create" })).toHaveAttribute("data-xcss-server-corner-state", "paint");
   expect(await account.getAttribute("data-xcss-server-corner-state")).toBeNull();
   await expect(account).toHaveCSS("border-radius", "50%");
   await expect(account).toHaveCSS("border-image-source", "none");

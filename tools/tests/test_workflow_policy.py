@@ -40,6 +40,18 @@ class WorkflowPolicyTests(unittest.TestCase):
             with self.subTest(reason=reason), self.assertRaisesRegex(MODULE.PolicyError, reason):
                 MODULE.validate_workflow(".github/workflows/release.yml", text.replace(old, new))
 
+    def test_web_release_has_its_own_tag_and_real_browser_archive_gates(self) -> None:
+        source = ".github/workflows/release-web.yml"
+        text = (ROOT / source).read_text()
+        MODULE.validate_workflow(source, text)
+        with self.assertRaisesRegex(MODULE.PolicyError, "only push tags web-v"):
+            MODULE.validate_workflow(source, text.replace('      - "web-v*"', '      - "v*"'))
+        for command in ("cargo install --locked wasm-bindgen-cli --version 0.2.129", "pnpm test:web:built", "python3 scripts/build-web-release-assets.py"):
+            with self.subTest(command=command), self.assertRaisesRegex(MODULE.PolicyError, "release gate"):
+                MODULE.validate_workflow(source, text.replace(command, "echo skipped"))
+        with self.assertRaisesRegex(MODULE.PolicyError, "only contents: read"):
+            MODULE.validate_workflow(".github/workflows/not-release.yml", text)
+
 
 if __name__ == "__main__":
     unittest.main()

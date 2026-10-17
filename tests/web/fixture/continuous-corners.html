@@ -4,13 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Continuous corner acceptance</title>
+    <link rel="stylesheet" href="/dist/design-tokens/tokens.css">
+    <link rel="stylesheet" href="/dist/design-tokens/tokens.dark.css">
+    <link rel="stylesheet" href="/dist/design-tokens/reset.css">
+    <link rel="stylesheet" href="/dist/design-tokens/accessibility.css">
+    <link rel="stylesheet" href="/dist/admin-ui/styles.css">
     <script type="module">
-      import "../../../web/design-tokens/tokens.css";
-      import "../../../web/design-tokens/tokens.dark.css";
-      import "../../../web/design-tokens/reset.css";
-      import "../../../web/design-tokens/accessibility.css";
-      import "../../../web/admin-ui/styles.css";
-      import { startServerCorners, createServerCornerGeometry } from "../../../web/admin-ui/src/server-corners.ts";
+      import { startServerCorners, createServerCornerGeometry } from "/dist/admin-ui/server-corners.js";
       window.startServerCorners = startServerCorners;
       window.createServerCornerGeometry = createServerCornerGeometry;
       window.serverCorners = startServerCorners(document);

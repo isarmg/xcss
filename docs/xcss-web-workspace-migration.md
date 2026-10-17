@@ -34,7 +34,7 @@ python3 xcss/scripts/vendor-xcss-web.py
 python3 xcss/scripts/vendor-xcss-web.py --check
 ```
 
-公共 npm 包 `@xcss/web` 仍固定为现有发布版本，提供原有 CSS、字体、许可证和构建接口。它保留兼容其他消费者的 React 导出；六个已迁移产品的生产界面不再导入 React。旧实现归档在各产品的 `web/tests/fixtures`，具体布局见产品维护文档；这些对照文件不进入生产产物，也不作为 Rust 迁移已通过的证据。
+首次迁移阶段的公共 npm 包仍保留旧界面导出和构建接口，产品也保留过对照夹具。当前 Web 2.0.0 已删除这些公共接口；产品的旧对照在有效业务断言迁入真实 WASM 后退役。版本、来源及实际验收以各仓库当前提交为准。
 
 ## 构建和追溯
 
@@ -71,7 +71,7 @@ python3 xcss/scripts/vendor-xcss-web.py --check
 
 后端保留 Axum，并对浏览器资源作针对性优化：构建时生成 `.wasm.gz`，运行时按 `Accept-Encoding` 协商，返回 `application/wasm`、`Content-Encoding: gzip` 和 `Vary: Accept-Encoding`。压缩与原始表示使用各自的强 ETag；HEAD、304 及缺失压缩文件回退保留原资源服务语义。HTML 预加载 WASM，让下载提前开始。沿用原有缓存策略，未以文件名猜测是否可永久缓存。
 
-压缩适配只用于静态 WASM，不涉及认证/API 响应。通用实现维护在 `xcss/scripts/xcss-web-assets.rs` 与 `xcss/web/xcss-web-assets.mjs`；`vendor-xcss-web.py --check` 同时验证六个独立仓库中的副本。
+压缩适配只用于静态 WASM，不涉及认证/API 响应。通用服务端实现为 `xcss::web_assets::wasm::response`；产品固定服务端 crate 修订号接入，不复制 Rust 模块或 Vite 插件。浏览器源码通过显式 `--destination` 校验其独立来源。
 
 首次迁移代码单独提交到各仓库的迁移分支，当时的 `main` 保留 React 方案。该阶段分支提交与推送没有触发线上部署，服务发行继续使用原发布流程。
 

@@ -15,9 +15,3 @@ assert.ok(!css.includes("unicode-range"), "Runtime fonts must not be split into 
 for (const [, face] of faces) {
   assert.ok(face.includes("font-display:block;"), "Every font is prepared before the UI is displayed");
 }
-
-const startup = JSON.parse(await readFile(new URL("../startup.json", import.meta.url), "utf8"));
-assert.equal(startup.policy, "all-fonts-before-ui");
-for (const [name, expected] of Object.entries(startup.assets)) {
-  assert.equal(createHash("sha256").update(await readFile(new URL(`../${name}`, import.meta.url))).digest("hex"), expected, name);
-}

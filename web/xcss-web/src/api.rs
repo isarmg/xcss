@@ -93,7 +93,7 @@ pub enum AuthPhase {
     LogoutUnconfirmed,
     Error,
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct AuthSnapshot {
     pub session: Option<AdministratorSession>,
     pub phase: AuthPhase,
@@ -156,8 +156,12 @@ fn begin_mutation() -> u64 {
         s.generation += 1;
         s.restore = None;
         s.session = None;
-        s.phase = AuthPhase::Anonymous;
-        s.error = None;
+        // Keep the revocation warning until a successful login replaces its
+        // session or the server confirms logout. A failed login is no proof.
+        if s.phase != AuthPhase::LogoutUnconfirmed {
+            s.phase = AuthPhase::Anonymous;
+            s.error = None;
+        }
         s.generation
     });
     changed();
@@ -695,9 +699,16 @@ pub async fn logout() -> Result<(), ApiError> {
         token,
         generation,
     )
-    .await;
+    .await
+    .and_then(|value| {
+        if value.is_null() {
+            Ok(())
+        } else {
+            Err(ApiError::local("invalid_response_shape"))
+        }
+    });
     match result {
-        Ok(Value::Null) => {}
+        Ok(()) => {}
         Err(error) if error.status == 401 && error.code == "auth.session_required" => {}
         Err(error) => {
             if require_generation(generation).is_ok() {
@@ -710,9 +721,15 @@ pub async fn logout() -> Result<(), ApiError> {
             }
             return Err(error);
         }
-        Ok(_) => return Err(ApiError::local("invalid_response_shape")),
     }
-    STATE.with(|s| s.borrow_mut().transport = None);
+    require_generation(generation)?;
+    STATE.with(|s| {
+        let mut s = s.borrow_mut();
+        s.transport = None;
+        s.phase = AuthPhase::Anonymous;
+        s.error = None;
+    });
+    changed();
     Ok(())
 }
 

@@ -14,9 +14,9 @@
 
 ## 管理 Web
 
-`createXcssAdminApplication` 组合产品身份、navigation、routes 和可选的共享 client。Shell 负责登录、恢复会话、退出、主题和通知；产品的业务组件通过 `useAdminApplication()` 获取 client、session 和 notify。
+`xcss-web::components::AdminShell` 通过普通 Rust 函数式子视图组合产品身份、登录、会话、主题和通知；产品使用 `api` 的类型化请求及 `HeaderNavigation`、`HeaderActions` 接入业务导航与操作。可编译示例见 [`examples/csr.rs`](../web/xcss-web/examples/csr.rs)。
 
-React 产品加载以下共享样式：
+CSR 产品从固定的 `@xcss/web` 资源归档加载以下样式：
 
 ```css
 @import "@xcss/web/design-tokens/tokens.css";
@@ -32,7 +32,7 @@ Server 在入口显式启动圆角渲染器，采用用户提供的 Mac mini 外
 ```ts
 import { startServerCorners } from "@xcss/web/admin-ui/server-corners";
 const corners = startServerCorners(document);
-// 幂等启动；测试、卸载或 HMR 清理时调用 corners.stop()。
+// 幂等启动；测试或卸载清理时调用 corners.stop()。
 ```
 
 `--xcss-server-corner-extent` 是显式选入属性，注册为不继承，避免面板中的普通文字、圆形和胶囊被误选。产品可以设置长度或短边百分比，并使用 `--xcss-server-corner-mode: clip` 选入媒体裁切；默认 `paint` 只绘制背景、边框和阴影。`data-xcss-server-corner="none"` 可显式排除。已有 `overflow:hidden/clip` 的表面使用固定在宿主坐标的 mask，缩放子图片仍按宿主轮廓裁切；mask 的白色外环保留边框盒外的原生焦点环和阴影。圆形、胶囊、零圆角导航和登录字段保留原形状。
@@ -43,11 +43,11 @@ const corners = startServerCorners(document);
 
 渲染器响应新增节点、尺寸、主题及交互状态。复杂渐变、CSS 图片背景和背景模糊保存在轮廓内的装饰子层；原生控件保持浏览器语义。生成的 SVG 使用控制器自己的 Blob URL，CSP 的 `img-src` 需允许 `blob:`；SVG 中不嵌任意 HTML 或外部图片。停止时先恢复作者样式，再释放 URL。强制颜色模式、有既有 mask/border-image、传统 table 布局、多片段行内元素、inset 阴影及不支持的边框形式恢复原样，并通过 `data-xcss-server-corner-state/reason` 标记原因。停止后恢复作者的行内样式，包括运行期间的新行内修改。轮廓绘制不作为点击命中边界使用。
 
-产品只在业务样式中调节角色及显式选入范围；共享规则和运行时通过不可变 xcss 发行交付，不能复制公共实现到产品或将本地路径依赖提交为正式来源。
+产品只在业务样式中调节角色及显式选入范围；共享资源通过不可变 Web 归档交付，浏览器 Rust 源码使用有真实提交和逐文件摘要的独立快照。不能依赖相邻仓库或将机器绝对路径提交为正式来源。
 
 ### 下拉选择面板
 
-单选下拉使用共享 `Select`。浏览器默认弹出的系统选项窗口无法由页面圆角渲染器接管，因此选项面板由共享组件呈现，并复用现有 `server-corners` 轮廓。只对整个面板设置圆角与裁切；面板不设外层内边距，选项行保持零圆角，文字间距由行内边距提供。首尾行的悬停和选中背景也受同一面板轮廓裁切，不另外拟合曲线或为每行增加圆角。
+单选下拉由产品 Rust 视图实现。浏览器默认弹出的系统选项窗口无法由页面圆角渲染器接管，因此选项面板由共享组件呈现，并复用现有 `server-corners` 轮廓。只对整个面板设置圆角与裁切；面板不设外层内边距，选项行保持零圆角，文字间距由行内边距提供。首尾行的悬停和选中背景也受同一面板轮廓裁切，不另外拟合曲线或为每行增加圆角。
 
 单选触发按钮显示垂直居中的 `>` 箭头，展开后旋转 90 度。面板在轮廓、裁切和阴影准备完成后显示，避免首次展开出现直角。输入框、文本区域、选择框和组合框聚焦时不绘制额外外轮廓，也不添加替代细边线。
 

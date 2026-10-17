@@ -9,7 +9,6 @@ xcss 是编译进产品的库。本文随 release-tool 归档提供，说明如�
 ```text
 release-tree.json
 artifacts/
-  xcss-web-1.0.0.tgz
   xcss-release-tool-1.0.0.tar.gz
   state-contract.json
   release-identity.json
@@ -46,13 +45,21 @@ python3 scripts/xcss-release.py create /absolute/release/artifacts   --product "
 
 ## 在源码仓库构建发行
 
-使用 Linux x86_64 GNU、Rust `1.99.0`、Node `26.7.0` 和 pnpm `10.34.6`，按[开发指南](https://github.com/isarmg/xcss/blob/main/docs/development.md)完成检查。正式构建要求源码干净、版本一致、精确 `v1.0.0` 标签指向当前 HEAD，随后由发行工作流执行：
+原生发行使用 Linux x86_64 GNU、Rust `1.99.0` 和 Python 3，按[开发指南](https://github.com/isarmg/xcss/blob/main/docs/development.md)完成相关检查。正式构建要求源码干净、原生版本一致、精确 `v1.0.0` 标签指向当前 HEAD，随后由原生发行工作流执行：
 
 ```sh
 python3 scripts/build-release-assets.py   --output "$RUNNER_TEMP/xcss-release"   --source-revision "$GITHUB_SHA"   --tag "$GITHUB_REF_NAME"
 ```
 
-这些环境变量由 GitHub Actions 提供。本地验证使用等价的明确路径、完整源码 SHA 和标签。脚本生成唯一 Web tgz、发行工具、状态/发行身份、构建清单、校验文件和外层 release-tree。
+这些环境变量由 GitHub Actions 提供。本地验证使用等价的明确路径、完整源码 SHA 和标签。原生脚本生成发行工具、状态/发行身份、构建清单、校验文件和外层 release-tree。
+
+Web 2 使用独立 `web-v2.0.0` 标签及 `release-web.yml`。该流程使用精确 Node、pnpm、Rust 和 wasm-bindgen，验证公开模块、真实 Rust CSR 双引擎浏览器和安装归档，再执行：
+
+```sh
+python3 scripts/build-web-release-assets.py --output "$RUNNER_TEMP/xcss-web-release" --source-revision "$GITHUB_SHA" --tag "$GITHUB_REF_NAME"
+```
+
+Web 输出为 `xcss-web-2.0.0.tgz`、`xcss-web-release.json` 和 `SHA256SUMS`。描述符绑定真实 tgz 的完整源码修订、版本、精确 GitHub URL、大小、SHA-256 和 SHA-512 integrity。下载后先执行 `sha256sum --check SHA256SUMS`，再核对可信标签和描述符；产品锁文件须记录同一 URL 和 SHA-512。Web 发行不修改原生 1.0.0 或历史 Web 1.0.0 资产。
 
 发布后回下载所有资产，执行完整校验，并在独立消费者中用固定 revision/tgz 重建验证。已公开的标签与资产保持不变；修复通过新版本交付。
 

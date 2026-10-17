@@ -1,6 +1,6 @@
 # 浏览器 Rust 公共库
 
-`web/xcss-web` 提供独立的 `xcss-web` xcss-web CSR 库，包含管理员会话、同源请求、CSRF、取消与超时、响应体边界、错误脱敏、中英文、主题、字体启动、管理外壳、账号设置、通知与原生对话框。它不依赖只支持 Linux AMD64 的服务端 `xcss` crate；Axum 和服务端发布目标保持原有边界。
+`web/xcss-web` 提供独立的 `xcss-web` CSR 库，包含管理员会话、同源请求、CSRF、取消与超时、响应体边界、错误脱敏、中英文、主题、字体启动、管理外壳、账号设置、通知与原生对话框。它不依赖只支持 Linux AMD64 的服务端 `xcss` crate；Axum 和服务端发布目标保持原有边界。
 
 当前 `main` 已采用集成的精简 xcss-web CSR、普通 Rust 函数式视图及 Rust Web 构建工具，六个产品继续使用 Axum。当前接入见[集成式 CSR 与 Rust 视图](rust-native-csr.md)，验收范围见[验证记录](rust-native-validation.md)。
 
@@ -35,7 +35,7 @@ cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- build -
 
 浏览器验收必须检查实际 `.wasm` 请求以及 Rust 启动后设置的 `html[data-xcss-runtime="xcss-web"]`，继续运行原有行为、安全与无障碍断言。环境变量或 HTML 文件名的变化本身不足以证明已经加载新运行时。
 
-原 npm 包中的 React 组件作为兼容接口保留，避免未参与本次迁移的消费者失效；这些接口不应再被迁移产品的生产入口导入。它们的历史测试不能替代 Rust/WASM 实现的验收。
+Web 资源包 2.0.0 仅提供合同、样式、字体和角标 DOM 适配器。旧组件与构建接口已删除；公共行为通过独立 Rust CSR 示例的真实 WASM 浏览器测试验证。
 
 ## Axum 对 WASM 的适配
 

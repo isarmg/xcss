@@ -1,0 +1,71 @@
+name: Release Web
+
+on:
+  push:
+    tags:
+      - "web-v*"
+
+permissions: {}
+
+env:
+  RUSTUP_TOOLCHAIN: 1.99.0
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Enforce workflow and Web release identity policy
+        run: |
+          python3 scripts/check-workflow-supply-chain.py
+          python3 scripts/check-xcss.py
+          python3 scripts/xcss-conformance.py verify-xcss
+      - name: Install the exact Rust CSR toolchain
+        run: |
+          rustup toolchain install 1.99.0 --profile minimal --target wasm32-unknown-unknown
+          cargo install --locked wasm-bindgen-cli --version 0.2.129
+      - name: Install exact Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.7.0
+          check-latest: false
+      - name: Install exact pnpm and locked test dependencies
+        run: |
+          npm install --global pnpm@10.34.6 --ignore-scripts
+          pnpm install --frozen-lockfile --ignore-scripts
+      - name: Verify Web assets, actual CSR browsers and installed archive
+        run: |
+          pnpm build
+          pnpm typecheck:built
+          pnpm test:built
+          pnpm exec playwright install --with-deps chromium firefox
+          pnpm test:web:built
+          python3 -m unittest discover -s tools/tests -p 'test_*.py'
+      - name: Build exact Web release assets and smoke their installed archive
+        run: >-
+          python3 scripts/build-web-release-assets.py
+          --output "$RUNNER_TEMP/xcss-web-release"
+          --source-revision "$GITHUB_SHA"
+          --tag "$GITHUB_REF_NAME"
+      - name: Publish immutable Web assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#web-v}"
+          notes="docs/releases/web-${version}.md"
+          test -f "$notes"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "Refusing to reuse or overwrite existing release $GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+          gh release create "$GITHUB_REF_NAME" \
+            "$RUNNER_TEMP/xcss-web-release/"* \
+            --verify-tag \
+            --title "xcss Web ${version}" \
+            --notes-file "$notes"

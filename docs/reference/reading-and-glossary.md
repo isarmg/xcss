@@ -12,10 +12,10 @@
 | SQLite 结构指纹 | `xcss::schema_identity` | 固定预期值夹具、产品 DDL |
 | SQLx 连接与诊断 | `xcss::sqlite` | 产品路径、锁和生命周期 |
 | AMD64 服务端 | `xcss::server_target` | 产品 `build.rs`、发行与启动 |
-| URL、超时、正文与错误 | `web/http-client/src/index.ts` | 软件包测试、产品 API 封装 |
-| 认证竞态 | `web/admin-web/src/index.ts` | 管理员客户端测试、React 钩子 |
-| React 状态 | `web/admin-web/src/react.tsx` | 产品应用及登录页面 |
-| React/Vite 精确版本 | `web/web-toolchain/` | 产品包清单与检查脚本 |
+| URL、超时、正文与错误 | `web/xcss-web/src/api.rs` | 软件包测试、产品 API 封装 |
+| 认证竞态 | `web/xcss-web/src/api.rs` | 真实CSR生命周期与网络交错测试 |
+| 浏览器状态与视图 | `web/xcss-web/src/components.rs` | 产品Rust函数视图及登录页面 |
+| Rust/WASM工具链 | `tools/web-build/` | 精确工具版本、源码快照及构建记录 |
 | CSS 与无障碍 | `web/design-tokens/` | 测试及产品视觉验收 |
 | tgz 问题 | `tools/xcss_package_artifacts.py` | 软件包测试与清单 |
 | 发行目录 | `tools/xcss_release/release.py` | 发行测试与资产构建工具 |

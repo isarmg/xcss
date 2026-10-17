@@ -11,11 +11,7 @@ const steps = [
   ["contracts", "tsconfig.json", "copy-contract-data.mjs"],
   ["design-tokens", "tsconfig.json", "copy-css.mjs"],
   ["web-fonts", null, "build.mjs"],
-  ["web-toolchain", "tsconfig.build.json", "copy-config.mjs"],
-  ["http-client", "tsconfig.json", null],
   ["admin-ui", "tsconfig.json", "copy-assets.mjs"],
-  ["admin-web", "tsconfig.build.json", null],
-  ["admin-shell", "tsconfig.json", null],
 ];
 await rm(join(root, "dist"), { recursive: true, force: true });
 await mkdir(join(root, "dist"));

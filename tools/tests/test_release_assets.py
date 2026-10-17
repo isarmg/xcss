@@ -5,6 +5,7 @@ import importlib.util
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,6 +32,15 @@ class ReleaseAssetTests(unittest.TestCase):
         from xcss_release.cli import CLI_VERSION as release_version
         self.assertEqual(package_version, MODULE.CURRENT_VERSION)
         self.assertEqual(release_version, MODULE.CURRENT_VERSION)
+
+    def test_native_inventory_has_no_web_toolchain_or_archive_dependency(self) -> None:
+        identity = MODULE.BuildIdentity("xcss", MODULE.CURRENT_VERSION, "a" * 40,
+                                        "x86_64-unknown-linux-gnu", "b" * 64)
+        with tempfile.TemporaryDirectory() as directory, patch.object(MODULE, "checked_output", return_value='{"packages":[{"name":"xcss","version":"1.0.0"}]}'):
+            inventory = MODULE.inventory(identity, Path(directory))
+        self.assertEqual(inventory["toolchains"], {"rust": MODULE.RUST_VERSION})
+        self.assertEqual([item["path"] for item in inventory["lockfiles"]], ["Cargo.lock"])
+        self.assertEqual(inventory["components"], [{"name": "xcss", "version": "1.0.0", "kind": "rust"}])
 
     def test_noncurrent_tag_is_rejected_before_source_inspection(self) -> None:
         with self.assertRaisesRegex(MODULE.ReleaseBuildError, "tag must be exactly"):

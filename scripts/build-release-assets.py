@@ -22,16 +22,9 @@ sys.path.insert(0, str(ROOT / "tools"))
 
 from xcss_policy import (  # noqa: E402
     CURRENT_VERSION,
-    NODE_VERSION,
-    PNPM_VERSION,
     RUST_VERSION,
     XcssPolicyError,
-    check_repository,
-)
-from xcss_package_artifacts import (  # noqa: E402
-    PackagePolicyError,
-    discover_packages,
-    package_release,
+    check_native_repository,
 )
 from xcss_release import (  # noqa: E402
     BuildIdentity,
@@ -165,8 +158,6 @@ def state_contract(source_revision: str) -> dict[str, Any]:
 
 def inventory(identity: BuildIdentity, artifacts: Path) -> dict[str, Any]:
     components = []
-    for package in discover_packages(ROOT):
-        components.append({"name": package.name, "version": package.version, "kind": "npm"})
     cargo = json.loads(checked_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]))
     for package in cargo["packages"]:
         if package["name"] == "xcss":
@@ -180,13 +171,11 @@ def inventory(identity: BuildIdentity, artifacts: Path) -> dict[str, Any]:
         "format": "sarmg.build-inventory.v1",
         "identity": identity.to_dict(),
         "toolchains": {
-            "node": NODE_VERSION,
-            "pnpm": PNPM_VERSION,
             "rust": RUST_VERSION,
         },
         "lockfiles": [
             {"path": name, "sha256": sha256_file(ROOT / name)}
-            for name in ("Cargo.lock", "pnpm-lock.yaml")
+            for name in ("Cargo.lock",)
         ],
         "components": sorted(components, key=lambda item: (item["kind"], item["name"])),
         "artifacts": described,
@@ -205,10 +194,9 @@ def checksums(artifacts: Path) -> None:
 def build(output: Path, source_revision: str, tag: str, target: str) -> Path:
     if target != "x86_64-unknown-linux-gnu":
         raise ReleaseBuildError("xcss release target must be x86_64-unknown-linux-gnu")
-    check_repository(ROOT)
+    check_native_repository(ROOT)
     verify_source(source_revision, tag)
     output, artifacts = prepare_output(output)
-    package_release(ROOT, discover_packages(ROOT), artifacts)
     build_tool_bundle(artifacts)
 
     contract_path = artifacts / "state-contract.json"
@@ -249,7 +237,6 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (
         XcssPolicyError,
-        PackagePolicyError,
         PolicyError,
         ReleaseBuildError,
         OSError,

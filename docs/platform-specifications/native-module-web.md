@@ -1,15 +1,7 @@
-# 原生嵌入式 Web 运行形态
+# 当前浏览器集成边界
 
-`web-embedded-native` 由 xcss 拥有原生 ESM 管理员客户端、当前合同、设计令牌、Maple 字体和构建策略。产品只保留原生业务页面与 HTTP/XHR 业务协议适配器，不引入 React。
+当前管理界面采用 `web-csr-admin`：独立 `xcss-web` WASM crate、纯Rust函数式视图、精简CSR核心与Axum内嵌资源。原生ESM适配不再是另一个管理运行形态，也不发布旧管理员客户端或Vite配置。
 
-`@xcss/web/web-toolchain/native` 提供唯一 Vite 配置：ES 输出、保留公开入口、相对资源 URL、外置字体、无 source map、非字体单资源 256 KiB 硬预算与完整字体 16 MiB 预算。默认产物为 `platform.js`、`platform.css` 及字体和许可证；产品可以从官方字体包的 `OFL.txt` 导出引用，构建时必须包含许可证。产品不能复制平台源码到自己的 vendor 目录。
+保留的浏览器边界包括 wasm-bindgen 生成的JS glue、共享角标DOM绘制，以及产品实际使用的第三方媒体引擎。它们通过窄接口服务真实CSR，不拥有第二套认证或业务状态。
 
-产品将生成的资源作为构建输入嵌入二进制，以资源名、媒体类型和实际字节共同计算缓存身份。声明文件从产品的纯再导出入口生成，不检查压缩后的 JS，不手写第二套平台类型。
-
-页面 HTML 仅嵌入业务元数据。登录、恢复和退出使用每个文档唯一的 `createAdministratorApiClient`；恢复完成前不得启动受保护业务 UI。会话与 CSRF 不进入 HTML、localStorage 或 sessionStorage。密码的表单策略由 `isAdministratorPassword` 判断 UTF-8 字节范围 12–1024，拒绝控制字符和孤立代理项；这不同于通信格式 DTO 的有界候选字符串校验。
-
-登录操作必须有 pending 防重复提交，结束时清除密码，失败时恢复可操作状态并将焦点返回密码。显示固定安全提示及经平台验证的请求 ID，不显示任意异常正文。CSP 使用同源外置 ESM/CSS/font，不允许内联脚本或 eval。
-
-适用产品的业务上传协议仍归产品。401 可在响应头阶段结束并取消未读正文；403 必须有有界正文和有效 xcss ErrorEnvelope 后才能按 `auth.csrf_rejected` 处理，不得恢复产品私有认证响应头或错误码。
-
-此能力只管理文档内状态。登录请求、会话 shape 校验和 CSRF 处理均通过共享管理员客户端执行。
+会话、CSRF、请求预算与管理组件由Rust公共库承担。产品只拥有业务视图、DTO与协议；CSP、同源资源及内嵌字节由产品构建和HTTP验收验证。具体接入见[浏览器公共库](../xcss-web.md)与[当前Shell](admin-web-shell.md)。

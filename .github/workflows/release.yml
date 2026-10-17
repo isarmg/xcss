@@ -24,7 +24,7 @@ jobs:
       - name: Enforce workflow and release identity policy
         run: |
           python3 scripts/check-workflow-supply-chain.py
-          python3 scripts/check-xcss.py
+          python3 scripts/check-xcss.py --native
           python3 scripts/xcss-conformance.py verify-xcss
       - name: Install exact Rust toolchain
         run: rustup toolchain install 1.99.0 --profile minimal --component rustfmt,clippy
@@ -40,15 +40,6 @@ jobs:
             cat "$log"
             grep -F "xcss supports only x86_64-unknown-linux-gnu server builds" "$log"
           done
-      - name: Install exact Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: 26.7.0
-          check-latest: false
-      - name: Install exact pnpm
-        run: npm install --global pnpm@10.34.6 --ignore-scripts
-      - name: Install locked dependencies
-        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Verify the Rust server package
         run: |
           cargo fmt --all -- --check
@@ -58,15 +49,8 @@ jobs:
           cargo clippy --locked --no-default-features -- -D warnings
           cargo test --locked --all-targets --all-features -- --test-threads=2
           RUSTDOCFLAGS="-Dwarnings" cargo doc --locked --all-features --no-deps
-      - name: Verify the Web package and Python tooling
-        run: |
-          pnpm build
-          pnpm typecheck:built
-          pnpm test:built
-          pnpm exec playwright install --with-deps chromium firefox
-          pnpm test:web:built
-          python3 -m unittest discover -s tools/tests -p 'test_*.py'
-          python3 scripts/package-artifacts.py smoke
+      - name: Verify native release tooling
+        run: python3 -m unittest discover -s tools/tests -p 'test_release_*.py'
       - name: Build exact release tree
         run: >-
           python3 scripts/build-release-assets.py

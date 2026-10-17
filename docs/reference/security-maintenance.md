@@ -4,7 +4,7 @@ xcss 修复通过消费者重建和重新发布进入部署环境。按实际受
 
 ## 认证漏洞响应
 
-若发现管理员 username 规范化、Argon2、令牌、同源、CSRF 或 admin-web 竞态问题：
+若发现管理员 username 规范化、Argon2、令牌、同源、CSRF 或 xcss-web::api 竞态问题：
 
 1. 暂停xcss和所有消费者发行；
 2. 确认受影响函数、版本和产品可达路径；

@@ -136,7 +136,14 @@ def matching_job_property(segment: list[Line], pattern: re.Pattern[str]) -> list
 
 
 def is_release_workflow(source: str) -> bool:
-    return tuple(PurePath(source).parts[-3:]) == (".github", "workflows", "release.yml")
+    return tuple(PurePath(source).parts[-3:]) in {
+        (".github", "workflows", "release.yml"),
+        (".github", "workflows", "release-web.yml"),
+    }
+
+
+def is_web_release(source: str) -> bool:
+    return is_release_workflow(source) and PurePath(source).name == "release-web.yml"
 
 
 def validate_job(source: str, header: Line, segment: list[Line]) -> None:
@@ -199,7 +206,7 @@ def validate_job(source: str, header: Line, segment: list[Line]) -> None:
             entries[0] if entries else permissions[0],
             f"job permissions must contain only {expected_permission}",
         )
-    if header.content in {"rust:", "release:"}:
+    if header.content in {"rust:", "release:"} and not is_web_release(source):
         commands = {line.content.removeprefix("run: ") for line in segment}
         required = {
             'if cargo check --locked -p xcss --target "$target" 2>"$log"; then',
@@ -217,7 +224,7 @@ def validate_release_trigger(source: str, lines: list[Line]) -> None:
         (0, "on:"),
         (2, "push:"),
         (4, "tags:"),
-        (6, '- "v*"'),
+        (6, '- "web-v*"' if is_web_release(source) else '- "v*"'),
     ]
     starts = [index for index, line in enumerate(lines) if line.indent == 0 and line.content == "on:"]
     if len(starts) != 1:
@@ -229,7 +236,7 @@ def validate_release_trigger(source: str, lines: list[Line]) -> None:
     )
     observed = [(line.indent, line.content) for line in lines[start:end]]
     if observed != expected:
-        raise fail(source, lines[start], "release workflow trigger must be only push tags v*")
+        raise fail(source, lines[start], "release workflow trigger must be only push tags " + ("web-v*" if is_web_release(source) else "v*"))
     jobs = job_segments(source, lines)
     if [header.content for header, _ in jobs] != ["release:"]:
         raise fail(source, None, "release workflow must contain only the Linux AMD64 release job")
@@ -400,13 +407,18 @@ def validate_actions(source: str, lines: list[Line]) -> None:
 def validate_release_gates(source: str, lines: list[Line]) -> None:
     if not is_release_workflow(source):
         return
-    required = [
+    required = ([
         "python3 scripts/xcss-conformance.py verify-xcss",
+        "cargo install --locked wasm-bindgen-cli --version 0.2.129",
         "pnpm build",
         "pnpm exec playwright install --with-deps chromium firefox",
         "pnpm test:web:built",
-    ]
-    build = next((line.number for line in lines if line.content == "python3 scripts/build-release-assets.py"), None)
+    ] if is_web_release(source) else [
+        "python3 scripts/xcss-conformance.py verify-xcss",
+        "cargo test --locked --all-targets --all-features -- --test-threads=2",
+    ])
+    builder = "python3 scripts/build-web-release-assets.py" if is_web_release(source) else "python3 scripts/build-release-assets.py"
+    build = next((line.number for line in lines if line.content == builder), None)
     previous = 0
     for command in required:
         matches = [line for line in lines if line.indent == 10 and line.content == command]

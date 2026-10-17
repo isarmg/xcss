@@ -20,7 +20,7 @@ state = "current"
 owner = "foundation"
 state = "current"
 
-[capabilities.react-shell]
+[capabilities.csr-shell]
 owner = "foundation"
 state = "current"
 

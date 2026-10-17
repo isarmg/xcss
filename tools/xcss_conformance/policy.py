@@ -131,7 +131,7 @@ def load_profiles(foundation_root: Path) -> tuple[dict[str, dict[str, Any]], set
     if set(profiles) != {
         "server-control-plane",
         "server-filesystem",
-        "web-react-admin",
+        "web-csr-admin",
         "web-embedded-native",
     }:
         raise ConformanceError("profiles: first-generation profile set is incomplete")

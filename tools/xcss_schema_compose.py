@@ -17,7 +17,7 @@ FOUNDATION_ROOT = Path(__file__).resolve().parents[1]
 PROFILE_IDS = {
     "server-control-plane",
     "server-filesystem",
-    "web-react-admin",
+    "web-csr-admin",
     "web-embedded-native",
 }
 CAPABILITY_DDL = {

@@ -1,6 +1,6 @@
 # 服务端公共支撑与产品职责
 
-xcss 为服务端产品提供一个 Rust crate 和一个管理 Web npm 包。Rust 能力通过 `xcss::<module>` 使用，Web 能力通过 `@xcss/web/<module>` 使用；内部模块共享版本、源码修订号、许可证与 Linux AMD64 GNU 平台边界。
+xcss 提供原生服务端 crate `xcss`、浏览器 crate `xcss-web` 及 Rust Web 构建工具。服务端通过 `xcss::<module>` 使用公共能力，浏览器通过 `xcss_web` 使用 CSR 组件和函数式视图。Linux AMD64 GNU 的原生运行边界不套用到浏览器 WASM；两者的依赖图和锁文件分别验证。
 
 ## 职责判定
 
@@ -13,8 +13,8 @@ xcss 为服务端产品提供一个 Rust crate 和一个管理 Web npm 包。Rus
 
 ## 接入与来源
 
-服务端组件使用 `server-control-plane` 或 `server-filesystem`；管理 Web 使用 `web-react-admin` 或 `web-embedded-native`。`xcss-product.toml` 声明具体组合与能力，产品固定 Rust 完整 Git 修订号、精确版本及唯一 Web 发行归档的完整性摘要。
+服务端组件使用 `server-control-plane` 或 `server-filesystem`；管理 Web 使用 `web-csr-admin` 或 `web-embedded-native`。`xcss-product.toml` 声明具体组合与能力，产品固定 Rust 完整 Git 修订号、精确版本及唯一 Web 发行归档的完整性摘要。
 
-`@xcss/web/admin-ui` 的内容块提供布局、色板和无障碍展示原语。实例统计、授权码、CPU/GPU/SSD/RAM、摄像头、Sunshine 控制等内容与行为由产品定义。消费者从锁定的发布包导入样式，不在产品仓库保存公共 CSS 的另一份事实源。
+`xcss-web` 提供管理布局、公共交互及无障碍展示原语。实例统计、授权码、CPU/GPU/SSD/RAM、摄像头和远程桌面控制等内容与行为由产品定义。CSS、字体和必要的 DOM 适配仍从可校验的公共来源使用，不能在产品中形成另一份手工维护来源。
 
-公共库通过编译依赖接入，无需单独安装后台服务。服务的初始化、运行、诊断、启停和卸载由具体产品的部署流程完成。
+公共库通过编译依赖接入，无需单独安装后台服务。业务 Server 只负责运行；初始化与离线维护由 xssi、升级与恢复由 xssc 执行。当前浏览器源码快照和构建步骤见 [CSR 接入](xcss-web.md)。

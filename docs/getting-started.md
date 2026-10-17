@@ -1,12 +1,12 @@
 # 开始接入 xcss
 
-本页面向把 xcss 加入服务端产品的开发者。准备 Linux x86_64 GNU、Rust `1.99.0`；需要管理 Web 时再准备 Node `26.7.0` 与 npm。
+xcss 的原生服务端、浏览器 CSR 和构建工具分别接入。服务端继续使用 Axum；Web 使用 `xcss-web` 的纯 Rust 函数式视图，只构建 CSR。准备 Linux x86_64 GNU、Rust `1.99.0`、`wasm32-unknown-unknown` target 和 wasm-bindgen CLI `0.2.129`。生产前端构建不要求 Node；浏览器验收按所用 Playwright 工具准备 Node。
 
-## 1. 添加 Rust 依赖
+## 原生服务端
 
-将[根 README 的固定依赖](../README.md#快速部署)加入产品 `Cargo.toml`。在产品根目录运行 `cargo check` 生成或更新 `Cargo.lock`，并提交锁文件。下列示例使用已发布的 1.0.2。版本 `=1.0.2` 与完整 Git revision 共同确定库的构建输入。
+在产品 `Cargo.toml` 固定 `xcss` 的官方 Git 来源、精确版本和完整 40 位修订，并提交生成的 `Cargo.lock`。选定修订必须实际包含产品使用的 API 和 profile；当前 main 的契约不能套用到旧发行修订。原生依赖的格式见[根 README](../README.md)，历史发行说明只适用于对应不可变发行物。
 
-在产品中创建 `examples/xcss_identity.rs`，加入以下示例：
+可用实际公开 API 验证接入：
 
 ```rust
 use xcss::admin_auth::normalize_administrator_username;
@@ -19,60 +19,48 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-在产品目录执行 `cargo run --locked --example xcss_identity`，预期输出 `admin.ops`。该示例验证依赖与一个公开 API；完整服务由产品选择认证存储、路由和生命周期适配。
+将示例放入产品 `examples/xcss_identity.rs`，执行 `cargo run --locked --example xcss_identity`，预期输出 `admin.ops`。完整服务仍由产品组合路由、认证存储和生命周期。
 
-## 2. 声明产品形态
+## 声明产品形态
 
-产品根目录的 `xcss-product.toml` 说明使用的版本、revision、profile 和 capabilities。下面是持久管理员 + Axum + React 管理 Web 的示例；产品名称改为实际名称，revision 与 Cargo 依赖保持一致。
+产品根目录的 `xcss-product.toml` 中，`foundation.version` 和 `foundation.git_rev` 与原生 Cargo 依赖一致。管理面选择以下组件；文件服务按 [profiles](../profiles/) 选择文件根能力：
 
 ```toml
-format = 1
-product_id = "example-server"
-
-[foundation]
-platform_generation = 1
-version = "1.0.2"
-git_rev = "3f751196615edd9f7fda2d76a5aa90f9f42586dc"
-
 [[components]]
 id = "server"
 profile = "server-control-plane"
 http_adapter = "axum"
-web_profile = "web-react-admin"
+web_profile = "web-csr-admin"
 capabilities = ["embedded-web", "platform-sqlite", "admin-persistent", "server-runtime", "server-health"]
 ```
 
-管理面和文件服务都使用 SQLite 持久管理员，文件服务另声明文件根能力，见[选择配置](configuration.md)。声明 `embedded-web` 后还需按[内嵌 Web](reference/embedded-web.md)提供实际构建输入。
+声明 `embedded-web` 后提供实际的 `xcss-web-build.json`，将最终静态资源内嵌 Server。产品业务 DTO、权限和状态机由产品维护，不进入公共库。
 
-## 3. 接入管理 Web
+## 浏览器与构建
 
-在产品 Web 目录安装同版发行包和需要的精确 peers：
+当前消费者通过仓库内的可校验源码快照使用 `xcss-web` crate；这不表示已发布 crates.io 包。来源修订、文件摘要、原始许可证及接入步骤见 [浏览器 Rust 公共库](xcss-web.md)。不再采用 React/Vite 管理 profile，也不提供旧 profile 别名。
+
+产品 `web/xcss-web/Cargo.toml` 使用公共 API：
+
+```toml
+[dependencies]
+xcss-web = { path = "vendor/xcss-web", default-features = false, features = ["csr"] }
+```
+
+准备工具链后，在产品根目录执行实际生产入口：
 
 ```sh
-npm pkg set 'engines.node=>=26.7.0 <27'
-npm install --save-exact https://github.com/isarmg/xcss/releases/download/v1.0.2/xcss-web-1.0.2.tgz
-npm install --save-exact react@19.3.0 react-dom@19.3.0
-npm install --save-dev --save-exact vite@8.3.3 @vitejs/plugin-react@6.1.2 typescript@7.0.2   @types/react@19.3.0 @types/react-dom@19.3.0 @types/node@26.6.4
+cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- build --product-root .
 ```
 
-提交生成的 `package-lock.json`；产品来源检查读取该锁文件的发行 URL 和完整性摘要。xcss 仓库自身用 pnpm 构建，产品消费路径使用 npm。`--save-exact` 保持清单中的精确版本，避免默认 `^` 范围与工具链检查冲突。
+CSS、字体及必要 JavaScript 适配使用固定的公共来源；资源来源不等同于界面运行时。视图与组件 API 见 [集成式 CSR 与 Rust 视图](rust-native-csr.md)。
 
-从公开子路径导入所需模块，例如：
+## 验证接入
 
-```ts
-import { createAdministratorApiClient } from "@xcss/web/admin-web";
-
-export const administratorApi = createAdministratorApiClient();
-```
-
-浏览器默认使用当前来源；在一个应用中共享这个 client。Shell、页面与样式的组合见[使用公共模块](usage.md)。
-
-## 4. 检查和构建产品
-
-在 xcss 源码根目录运行，替换产品绝对路径：
+在所选 xcss 修订的源码根目录执行：
 
 ```sh
-python3 scripts/xcss-conformance.py report   --product-root /absolute/path/to/product --json
+python3 scripts/xcss-conformance.py report --product-root /absolute/path/to/product --json
 ```
 
-根据报告完成来源、Schema、Web 和发行声明，再构建并运行产品自身的测试。`report` 的 `release_verified` 只有实际发行清单通过验证才为 true；发行校验使用[正式验收入口](development.md#验证实际消费者)。
+来源、Schema、Web 和发行声明分别校验；`release_verified` 只在实际发行清单通过验证时为 true。随后运行产品自身的 Rust 与真实 WASM 浏览器测试，公共库单测不能替代产品验收。

@@ -6,9 +6,9 @@ xcss 的产品接入由 `xcss-product.toml` 声明。产品的业务配置字段
 
 | Profile | 使用场景 | 主要必需能力 |
 |---|---|---|
-| `server-control-plane` | SQLite 持久管理面，Axum 与 React 管理 Web | platform-sqlite、admin-persistent、server-runtime、server-health |
+| `server-control-plane` | SQLite 持久管理面，Axum 与 Rust/WASM CSR 管理 Web | platform-sqlite、admin-persistent、server-runtime、server-health |
 | `server-filesystem` | SQLite 持久管理员与文件根，Axum | platform-sqlite、admin-persistent、server-runtime、server-health、filesystem-root、linux-openat2 |
-| `web-react-admin` | React 管理外壳和页面 | 由对应服务端组件选择 |
+| `web-csr-admin` | xcss-web Rust/WASM CSR 管理外壳和页面 | 由对应服务端组件选择 |
 | `web-embedded-native` | 原生 ESM 管理页面 | 由对应服务端组件选择 |
 
 完整组合、必需/可选能力和平台常量见 [profiles](../profiles/)；清单字段见 [JSON Schema](../schemas/xcss-product.schema.json)。带管理 Web 的服务端声明 `embedded-web` 并提供 `xcss-web-build.json`。

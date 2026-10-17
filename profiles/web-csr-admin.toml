@@ -1,12 +1,12 @@
 format = 1
-id = "web-react-admin"
+id = "web-csr-admin"
 kind = "web"
-formal_targets = ["browser-es2022"]
+formal_targets = ["wasm32-unknown-unknown", "browser-es2022"]
 http_adapters = []
 web_profiles = []
 required_capabilities = [
   "admin-client",
-  "react-shell",
+  "csr-shell",
   "admin-ui",
   "design-tokens",
   "maple-font",

@@ -63,7 +63,7 @@
             "enum": [
               "server-control-plane",
               "server-filesystem",
-              "web-react-admin",
+              "web-csr-admin",
               "web-embedded-native"
             ]
           },
@@ -75,7 +75,7 @@
           },
           "web_profile": {
             "enum": [
-              "web-react-admin",
+              "web-csr-admin",
               "web-embedded-native"
             ]
           },

@@ -221,10 +221,10 @@ class ConformanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ConformanceError, "target is not canonical"):
                 verify_release(product, ROOT)
 
-    def test_filesystem_profile_accepts_native_and_react_web(self) -> None:
+    def test_filesystem_profile_accepts_native_and_csr_web(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             product = Path(directory)
-            for profile in ("web-embedded-native", "web-react-admin"):
+            for profile in ("web-embedded-native", "web-csr-admin"):
                 (product / "xcss-product.toml").write_text(
                     VALID_MANIFEST.replace("web-embedded-native", profile), encoding="utf-8"
                 )
@@ -240,6 +240,16 @@ class ConformanceTests(unittest.TestCase):
             product = Path(directory)
             (product / "xcss-product.toml").write_text(VALID_MANIFEST.replace("server-filesystem", "offline-tool"))
             with self.assertRaisesRegex(ConformanceError, "unknown Profile"):
+                verify_manifest(product, ROOT)
+
+    def test_retired_react_profile_has_no_compatibility_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            product = Path(directory)
+            (product / "xcss-product.toml").write_text(
+                VALID_MANIFEST.replace("web-embedded-native", "web-react-admin"),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ConformanceError, "web_profile is not allowed"):
                 verify_manifest(product, ROOT)
 
     def test_unknown_server_profile_is_rejected(self) -> None:
@@ -272,7 +282,7 @@ git_rev = "0123456789abcdef0123456789abcdef01234567"
 id = "server"
 profile = "server-control-plane"
 http_adapter = "axum"
-web_profile = "web-react-admin"
+web_profile = "web-csr-admin"
 capabilities = ["platform-sqlite", "admin-persistent", "server-runtime", "server-health", "embedded-web"]
 '''
         with tempfile.TemporaryDirectory() as directory:

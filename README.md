@@ -10,11 +10,13 @@ xcss 是服务端与管理 Web 的公共基础库。`main` 提供服务端 crate
 
 ## 适用平台
 
-Rust 与 Web 构建仅支持 Linux x86_64 GNU（glibc）。部署后的管理页面可通过不同操作系统上的浏览器访问。
+原生服务端与当前 Web 构建工具支持 Linux x86_64 GNU（glibc）；浏览器 crate 的运行目标为 `wasm32-unknown-unknown`。部署后的管理页面可通过不同操作系统上的浏览器访问。
 
 ## 当前 CSR 接入
 
 框架与共享浏览器源码统一位于 `web/xcss-web`，通过 `scripts/vendor-xcss-web.py` 同步为产品内的独立源码快照。各产品保持 Axum 后端，只构建 CSR；普通 Rust DOM builder 可直接使用 rustfmt 和 Clippy。
+
+当前管理 Web 采用 `web-csr-admin` profile 和 `csr-shell` 能力，旧 React profile 不提供兼容别名。接入与构建边界见[开始接入](docs/getting-started.md)，具体组合以 [profiles](profiles/) 为准。
 
 下游通过 Cargo crate API 接入，当前使用项目内的源码快照；本次更名没有发布新的 crates.io 包。在产品的 `web/xcss-web/Cargo.toml` 中声明：
 

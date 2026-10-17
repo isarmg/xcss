@@ -296,7 +296,7 @@
 | FND-294 | 钩子把401/superseded归anonymous，其余恢复会话失败归error | catch分类 | error分类测试 |
 | FND-295 | Vite 辅助函数固定 React plugin、dist 与 emptyOutDir，并限制资源大小 | `web/web-toolchain/src/vite.ts` 的 `createXcssReactViteConfig` | 配置与资源预算边界测试；实际产品 build |
 | FND-296 | Vite 选项允许 base 和 maxAssetBytes | 函数参数 `{base?: string; maxAssetBytes?: number}` | 预算默认 512 KiB，允许 1 字节至 64 MiB；不扩展为产品业务构建配置 |
-| FND-297 | Xczs 采用 React/Vite 管理外壳并组合原生文件业务模块 | Xczs `web-react-admin` 清单与管理 Web | 同一构建、认证与嵌入合同；文件/上传控制器保持产品业务验收 |
+| FND-297 | Xczs 采用 xcss-web CSR 管理外壳并组合 Rust 文件业务模块 | Xczs `web-csr-admin` 清单与管理 Web | 同一构建、认证与嵌入合同；文件/上传控制器保持产品业务验收 |
 
 ## 设计原语：`@xcss/web/design-tokens`
 

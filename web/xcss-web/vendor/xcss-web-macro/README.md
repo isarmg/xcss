@@ -446,29 +446,10 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(rustc_nightly)'] }
 
 ## 历史记录：XCSS_CSR_CLEANUP.patch
 
-```text
---- a/src/lib.rs
-+++ b/src/lib.rs
-@@ -11,7 +11,9 @@
- use component::DummyModel;
- use proc_macro::TokenStream;
- use proc_macro2::{Span, TokenTree};
--use quote::{quote, ToTokens};
-+use quote::quote;
-+#[cfg(feature = "full")]
-+use quote::ToTokens;
- use std::str::FromStr;
- use syn::{spanned::Spanned, token::Pub, Visibility};
- 
---- a/src/view/mod.rs
-+++ b/src/view/mod.rs
-@@ -1947,6 +1947,7 @@
-     }
- }
- 
-+#[cfg(debug_assertions)]
- pub(crate) fn ident_from_tag_name(
-     tag_name: &NodeName,
-     errors: &mut Errors,
+以下 JSON 的 `patch` 字段保留原补丁完整文本，包括空白上下文与换行；将该字段按 UTF-8 编码即可还原原始补丁。
 
+```json
+{
+  "patch": "--- a/src/lib.rs\n+++ b/src/lib.rs\n@@ -11,7 +11,9 @@\n use component::DummyModel;\n use proc_macro::TokenStream;\n use proc_macro2::{Span, TokenTree};\n-use quote::{quote, ToTokens};\n+use quote::quote;\n+#[cfg(feature = \"full\")]\n+use quote::ToTokens;\n use std::str::FromStr;\n use syn::{spanned::Spanned, token::Pub, Visibility};\n \n--- a/src/view/mod.rs\n+++ b/src/view/mod.rs\n@@ -1947,6 +1947,7 @@\n     }\n }\n \n+#[cfg(debug_assertions)]\n pub(crate) fn ident_from_tag_name(\n     tag_name: &NodeName,\n     errors: &mut Errors,\n"
+}
 ```

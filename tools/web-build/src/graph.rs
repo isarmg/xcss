@@ -86,12 +86,7 @@ pub fn validate(metadata: &Value, frontend: &Path) -> Result<Value> {
     };
     let facade = reachable
         .iter()
-        .filter_map(|id| {
-            by_id
-                .get(id)
-                .filter(|p| p["name"] == "xcss-web")
-                .map(|p| *p)
-        })
+        .filter_map(|id| by_id.get(id).filter(|p| p["name"] == "xcss-web").copied())
         .collect::<Vec<_>>();
     ensure!(
         facade.len() == 1,

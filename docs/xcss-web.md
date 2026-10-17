@@ -12,14 +12,14 @@
 
 每个产品在 `web/xcss-web/vendor/xcss-web` 保存明确的源码快照，Cargo 只读取这个项目内的相对路径。`SOURCE.json` 记录来源仓库、基础提交和实际文件 SHA-256；基础提交本身不代表工作区新增源码已经发布。任何源码差异均以实际哈希为准。
 
-公共组件修改后，在包含这些产品 checkout 的工作区运行：
+公共组件修改并提交后，在 xcss 仓库指定接收目录：
 
 ```sh
-python3 scripts/vendor-xcss-web.py
-python3 scripts/vendor-xcss-web.py --check
+python3 scripts/vendor-xcss-web.py --destination /absolute/consumer/web/xcss-web/vendor/xcss-web
+python3 scripts/vendor-xcss-web.py --check --destination /absolute/consumer/web/xcss-web/vendor/xcss-web
 ```
 
-可用 `--product xscs` 指定单个产品。脚本只同步明确的 Rust 源、Cargo 清单和许可证；遇到未知文件或符号链接会停止。产品无需此脚本或兄弟 checkout 即可构建。
+可以重复 `--destination` 指定接收目录；公共工具不包含产品名单，也不读取父目录查找产品。分发内容包括当前 Rust 源、启动适配、共享故障测试、Cargo 清单和原始许可证。未提交的来源不能绑定到旧 Git 修订；接收目录中的编辑、未知文件、符号链接或硬链接会被拒绝。相同字节保留时间戳，不强迫 Cargo 重编译。产品无需此脚本或兄弟 checkout 即可构建。
 
 产品使用 `tools/web-build` 中的 Rust CLI，固定 Rust 1.99.0 和 wasm-bindgen 0.2.129；已移除退役的 Python 构建器及其专属测试，来源清单和编译期间输入变化继续由 Rust 构建器及其单元测试验证。当前构建在开始、结束时核对输入，验证 vendored 来源清单，并记录浏览器 Cargo.lock、依赖来源/校验和及生成文件哈希到 `web/pkg/xcss-web-build.json`。产品将这份记录一起嵌入 Axum 资源。
 
@@ -41,4 +41,4 @@ cargo +1.99.0 run --locked --manifest-path tools/web-build/Cargo.toml -- build -
 
 后端保留 Axum，并对浏览器资源作针对性优化：构建时生成 `.wasm.gz`，运行时按 `Accept-Encoding` 协商，返回 `application/wasm`、`Content-Encoding: gzip` 和 `Vary: Accept-Encoding`。压缩与原始表示使用各自的强 ETag；HEAD、304 及缺失压缩文件回退保留原资源服务语义。HTML 预加载 WASM，让下载提前开始。沿用原有缓存策略，未以文件名猜测是否可永久缓存。
 
-压缩适配只用于静态 WASM，不涉及认证/API 响应。通用实现维护在 `xcss/scripts/xcss-web-assets.rs` 与 `xcss/web/xcss-web-assets.mjs`；`vendor-xcss-web.py --check` 同时验证六个独立仓库中的副本。
+压缩适配只用于静态 WASM，不涉及认证/API 响应。公共 Rust 入口为 `xcss::web_assets::wasm::response`，接入见[内嵌资源](reference/embedded-web.md)；源码快照工具只分发浏览器包，不再复制服务端模块或 Vite 插件。

@@ -24,7 +24,7 @@
 cargo +1.99.0 test --locked --manifest-path tools/web-build/Cargo.toml
 cargo +1.99.0 fmt --manifest-path web/xcss-web/Cargo.toml -- --check
 cargo +1.99.0 clippy --locked --manifest-path web/xcss-web/Cargo.toml --target wasm32-unknown-unknown -- -D warnings
-python3 scripts/vendor-xcss-web.py --check
+python3 scripts/vendor-xcss-web.py --check --destination /absolute/consumer/web/xcss-web/vendor/xcss-web
 ```
 
 构建与发布资源合同详见 [Rust 构建工具](../tools/web-build/README.md)。原精简实验报告保留自己的业务基线与测试范围，不能把新 DTO、Markdown 或视图改写混入旧实验百分比。

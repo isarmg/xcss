@@ -14,7 +14,7 @@ xcss 是服务端与管理 Web 的公共基础库。`main` 提供服务端 crate
 
 ## 当前 CSR 接入
 
-框架与共享浏览器源码统一位于 `web/xcss-web`，通过 `scripts/vendor-xcss-web.py` 同步为产品内的独立源码快照。各产品保持 Axum 后端，只构建 CSR；普通 Rust DOM builder 可直接使用 rustfmt 和 Clippy。
+框架与共享浏览器源码统一位于 `web/xcss-web`，通过 `scripts/vendor-xcss-web.py --destination <接收目录>` 同步可核验的独立源码快照。工具不包含产品名单，不依赖父目录或兄弟仓库；产品保持 Axum 后端，只构建 CSR，普通 Rust DOM builder 可直接使用 rustfmt 和 Clippy。
 
 当前管理 Web 采用 `web-csr-admin` profile 和 `csr-shell` 能力，旧 React profile 不提供兼容别名。接入与构建边界见[开始接入](docs/getting-started.md)，具体组合以 [profiles](profiles/) 为准。
 

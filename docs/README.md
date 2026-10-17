@@ -25,3 +25,4 @@ Rust 与 Web 构建目标为 Linux x86_64 GNU；部署后的浏览器页面可�
 - [七仓库 React 到 Leptos 迁移总览与分支约定](leptos-workspace-migration.md)
 - [集成式 CSR、纯 Rust 视图与生产构建](rust-native-csr.md)
 - [类型化 HTTP 请求与响应合同](leptos-typed-http.md)
+- [Rust 原生迁移验证与实测体积](rust-native-validation.md)

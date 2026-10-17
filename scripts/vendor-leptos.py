@@ -32,7 +32,16 @@ def main() -> None:
                 paths.append(path)
     payload = {str(path.relative_to(source)): path.read_bytes() for path in paths}
     payload["LICENSE"] = (project / "LICENSE").read_bytes()
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=project, text=True).strip()
+    # Documentation/native-only commits do not change this browser snapshot.
+    # Keep its source revision stable while the exact file hashes remain equal.
+    revision = subprocess.check_output(
+        ["git", "log", "-1", "--format=%H", "--", "web/leptos/Cargo.toml",
+         ":(glob)web/leptos/src/**/*.rs", "web/leptos/vendor/leptos-csr",
+         "web/leptos/vendor/leptos-macro-csr", "LICENSE"],
+        cwd=project, text=True,
+    ).strip()
+    if len(revision) != 40:
+        raise SystemExit("Browser source must have a committed base revision")
     metadata = {"format": 1, "package": "xcss-web", "version": "1.0.0",
                 "origin": "https://github.com/isarmg/xcss", "base_revision": revision,
                 "source_directory": "web/leptos", "files": {

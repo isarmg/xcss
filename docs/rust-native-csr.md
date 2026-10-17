@@ -30,3 +30,5 @@ python3 scripts/vendor-leptos.py --check
 ```
 
 构建与发布资源合同详见 [Rust 构建工具](../tools/web-build/README.md)。原精简实验报告保留自己的业务基线与测试范围，不能把新 DTO、Markdown 或视图改写混入旧实验百分比。
+
+本轮产物、实际回归范围与语法改写体积对照见 [迁移验证记录](rust-native-validation.md)。

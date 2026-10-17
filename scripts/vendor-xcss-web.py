@@ -18,7 +18,8 @@ def main() -> None:
     args = parser.parse_args()
     project = Path(__file__).resolve().parents[1]
     source = project / "web/xcss-web"
-    paths = [source / "Cargo.toml", source / "README.md", *sorted((source / "src").rglob("*.rs"))]
+    paths = [source / "Cargo.toml", source / "README.md", source / "startup.js", source / "startup.css",
+             *sorted((source / "src").rglob("*.rs")), source / "tests/startup-failures.mjs"]
     # Runtime and host macros are one reviewed xcss browser distribution. Keep
     # their MIT notices and README source/patch history intact.
     for name in ("xcss-web-core", "xcss-web-macro"):
@@ -36,7 +37,8 @@ def main() -> None:
     # Keep its source revision stable while the exact file hashes remain equal.
     revision = subprocess.check_output(
         ["git", "log", "-1", "--format=%H", "--", "web/xcss-web/Cargo.toml", "web/xcss-web/README.md",
-         ":(glob)web/xcss-web/src/**/*.rs", "web/xcss-web/vendor/xcss-web-core",
+         ":(glob)web/xcss-web/src/**/*.rs", "web/xcss-web/startup.js", "web/xcss-web/startup.css",
+         ":(glob)web/xcss-web/tests/*.mjs", "web/xcss-web/vendor/xcss-web-core",
          "web/xcss-web/vendor/xcss-web-macro", "LICENSE"],
         cwd=project, text=True,
     ).strip()

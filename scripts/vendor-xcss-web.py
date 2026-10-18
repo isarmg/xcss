@@ -45,7 +45,7 @@ def assets_payload(project: Path) -> dict[str, bytes]:
     for name in ("admin-ui", "design-tokens"):
         paths.extend(sorted((source / name).glob("*.css")))
     paths.extend(source / "web-fonts" / name for name in (
-        "boot.css", "fonts.css", "provenance.json", "startup.json",
+        "boot.css", "fonts.css", "provenance.json",
         "MapleMonoFull-Regular.woff2", "MapleMonoFull-Bold.woff2",
         "OFL.txt", "NORMAL-LICENSE.txt", "CJK-LICENSE.txt",
     ))

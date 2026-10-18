@@ -183,7 +183,6 @@ class AssetsVendorTests(VendorFixture):
             "web-fonts/boot.css": b"html[data-xcss-fonts=pending] body { visibility: hidden; }\n",
             "web-fonts/fonts.css": b"@font-face { font-family: fixture; }\n",
             "web-fonts/provenance.json": b'{"assets": {}}\n',
-            "web-fonts/startup.json": b'{"format": 1}\n',
             "web-fonts/MapleMonoFull-Regular.woff2": b"wOF2regular-fixture",
             "web-fonts/MapleMonoFull-Bold.woff2": b"wOF2bold-fixture",
             "web-fonts/OFL.txt": b"Fixture original font notice\n",
@@ -207,6 +206,7 @@ class AssetsVendorTests(VendorFixture):
         files.update({
             "admin-ui/server-corners.js": b"export function startServerCorners() {}\n",
             "admin-ui/server-corner-geometry.js": b"export const oldGeometry = true;\n",
+            "web-fonts/startup.json": b'{"format": 1, "retired": true}\n',
         })
         archive = "https://github.com/isarmg/xcss/releases/download/v1.0.0/xcss-web-1.0.0.tgz"
         metadata = {
@@ -286,6 +286,7 @@ class AssetsVendorTests(VendorFixture):
         self.assertEqual(self.snapshot(destination), payload)
         self.assertFalse((destination / "admin-ui/server-corners.js").exists())
         self.assertFalse((destination / "admin-ui/server-corner-geometry.js").exists())
+        self.assertFalse((destination / "web-fonts/startup.json").exists())
         self.assertEqual(css.read_bytes(), previous["admin-ui/styles.css"])
         self.assertEqual(license_path.read_bytes(), previous["LICENSE"])
         self.assertEqual(css.stat().st_mtime_ns, css_time)

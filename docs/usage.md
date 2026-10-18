@@ -16,7 +16,7 @@
 
 `xcss-web::components::AdminShell` 通过普通 Rust 函数式子视图组合产品身份、登录、会话、主题和通知；产品使用 `api` 的类型化请求及 `HeaderNavigation`、`HeaderActions` 接入业务导航与操作。可编译示例见 [`examples/csr.rs`](../web/xcss-web/examples/csr.rs)。
 
-CSR 产品从固定的 `@xcss/web` 资源归档加载以下样式：
+CSR 产品从固定的 `@xcss/web` Git 静态资源快照加载以下样式：
 
 ```css
 @import "@xcss/web/design-tokens/tokens.css";
@@ -27,7 +27,7 @@ CSR 产品从固定的 `@xcss/web` 资源归档加载以下样式：
 @import "@xcss/web/admin-ui/styles.css";
 ```
 
-Server 的 Rust 浏览器入口通过 `mount_server` 启动共享圆角渲染器，采用用户提供的 Mac mini 外壳模型所拟合的七次 Bézier 轮廓；client 的原生圆角由各平台单独实现。每个角沿用同一局部曲线并等比缩放，矩形的长宽差由连接直线承担。该模型的理想曲线与直线在端点满足 G3，运行时 SVG 使用受控离散近似。默认几何误差目标为 0.05 CSS px，运行时使用更小的 0.02 px 预算。这是本地硬件模型的拟合结果，不是经 Apple 认证的 UI mask 或 SwiftUI `.continuous` 算法。
+Server 的 Rust 浏览器入口通过 `mount_server` 启动共享圆角渲染器，采用用户提供的 Mac mini 外壳模型所拟合的七次 Bézier 轮廓；client 的原生圆角由各平台单独实现。每个角沿用同一局部曲线并等比缩放，矩形的长宽差由连接直线承担。该模型的理想曲线与直线在端点满足 G3，运行时 SVG 使用受控离散近似。几何 API 要求调用者显式指定误差预算，运行时控制器使用 0.02 CSS px。这是本地硬件模型的拟合结果，不是经 Apple 认证的 UI mask 或 SwiftUI `.continuous` 算法。
 
 ```rust
 xcss_web::mount_server("root", App);

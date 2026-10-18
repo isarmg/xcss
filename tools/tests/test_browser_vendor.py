@@ -16,7 +16,7 @@ vendor = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(vendor)
 
 
-class BrowserVendorTests(unittest.TestCase):
+class VendorFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
@@ -51,6 +51,8 @@ class BrowserVendorTests(unittest.TestCase):
         self.git("add", ".")
         self.git("-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "Fixture")
 
+
+class BrowserVendorTests(VendorFixture):
     def test_explicit_independent_destinations_preserve_identical_input_mtimes(self) -> None:
         payload = vendor.browser_payload(self.project)
         for name in ("arbitrary-consumer-one", "another-layout/portable-library"):
@@ -105,6 +107,65 @@ class BrowserVendorTests(unittest.TestCase):
         self.assertEqual(json.loads(payload["SOURCE.json"])["base_revision"],
                          self.git("rev-parse", "HEAD").decode().strip())
         vendor.synchronize(destination, payload, check=True)
+
+
+class BuilderVendorTests(VendorFixture):
+    def setUp(self) -> None:
+        super().setUp()
+        self.builder = self.project / "tools/web-build"
+        for name, content in {
+            "Cargo.toml": '[package]\nname="xcss-web-build"\nversion="1.0.0"\n',
+            "Cargo.lock": "# Fixture lock\n", "README.md": "Fixture builder\n",
+            ".gitignore": "/target/\n", "test-preview.mjs": "export {};\n",
+            "src/main.rs": "fn main() {}\n", "tests/preview.rs": "// Fixture test\n",
+        }.items():
+            path = self.builder / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+        self.commit()
+
+    def test_matching_builder_adoption_keeps_cache_and_binds_license_and_revision(self) -> None:
+        payload = vendor.builder_payload(self.project)
+        destination = self.root / "consumer/tools/web-build"
+        destination.mkdir(parents=True)
+        (destination / "Cargo.toml").write_bytes(payload["Cargo.toml"])
+        cache = destination / "target/debug/cached-binary"
+        cache.parent.mkdir(parents=True)
+        cache.write_bytes(b"Cached build")
+        vendor.synchronize(destination, payload, check=False)
+        vendor.synchronize(destination, payload, check=True)
+        metadata = json.loads(payload["SOURCE.json"])
+        self.assertEqual(metadata["package"], "xcss-web-build")
+        self.assertEqual(metadata["source_directory"], "tools/web-build")
+        self.assertEqual(metadata["base_revision"], self.git("rev-parse", "HEAD").decode().strip())
+        self.assertEqual((destination / "LICENSE").read_text(), "Fixture notice\n")
+        self.assertEqual(cache.read_bytes(), b"Cached build")
+        self.assertNotIn("target", metadata["files"])
+
+    def test_builder_adoption_preserves_differing_or_unknown_authored_files(self) -> None:
+        payload = vendor.builder_payload(self.project)
+        for name in ("src/main.rs", "authored.txt"):
+            destination = self.root / name.replace("/", "-")
+            path = destination / name
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"Consumer work")
+            with self.assertRaisesRegex(ValueError, "edited or unrecorded"):
+                vendor.synchronize(destination, payload, check=False)
+            self.assertEqual(path.read_bytes(), b"Consumer work")
+
+    def test_builder_update_removes_only_verified_retired_inputs(self) -> None:
+        retired = self.builder / "src/retired.rs"
+        retired.write_text("// Retired fixture\n")
+        self.commit()
+        destination = self.root / "consumer"
+        vendor.synchronize(destination, vendor.builder_payload(self.project), check=False)
+        retired.unlink()
+        self.commit()
+        payload = vendor.builder_payload(self.project)
+        vendor.synchronize(destination, payload, check=False)
+        self.assertFalse((destination / "src/retired.rs").exists())
+        self.assertEqual(json.loads(payload["SOURCE.json"])["base_revision"],
+                         self.git("rev-parse", "HEAD").decode().strip())
 
 
 if __name__ == "__main__":

@@ -40,6 +40,8 @@ capabilities = ["embedded-web", "platform-sqlite", "admin-persistent", "server-r
 
 当前消费者通过仓库内的可校验源码快照使用 `xcss-web` crate；这不表示已发布 crates.io 包。来源修订、文件摘要、原始许可证及接入步骤见 [浏览器 Rust 公共库](xcss-web.md)。不再采用 React/Vite 管理 profile，也不提供旧 profile 别名。
 
+`tools/web-build` 同样由 xcss 分发已提交的独立源码快照，产品保留 `SOURCE.json` 并在构建时校验来源及完整库存。同步和独立校验命令见[构建工具说明](../tools/web-build/README.md)，不手工复制后分别维护。
+
 产品 `web/xcss-web/Cargo.toml` 使用公共 API：
 
 ```toml

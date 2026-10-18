@@ -374,7 +374,7 @@ test("the actual shared account entry retains its circular shape under the serve
   await page.goto("/");
   const account = page.locator(".xcss-account-entry");
   await expect(account).toBeVisible();
-  await page.evaluate(async () => { const { startServerCorners } = await import("/dist/admin-ui/server-corners.js"); window.serverCorners = startServerCorners(document); });
+  await page.evaluate(async () => { const { startServerCorners } = await import("/corner-test-api.js"); window.serverCorners = startServerCorners(document); });
   await expect(page.locator(".xcss-button").filter({ hasText: "Create" })).toHaveAttribute("data-xcss-server-corner-state", "paint");
   expect(await account.getAttribute("data-xcss-server-corner-state")).toBeNull();
   await expect(account).toHaveCSS("border-radius", "50%");
@@ -584,7 +584,7 @@ test("Blob SVGs obey a restrictive image CSP and stop revokes controller-owned U
     // Product builds already convert their static data-icon masks to same-origin
     // assets. Disable those unrelated fixture icons to test only dynamic URLs.
     const body=(await response.text()).replace("<style>","<style>#auth span::before,#auth button::before{mask:none!important}");
-    await route.fulfill({ response, body, headers:{ ...response.headers(), "content-security-policy":"default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'" } });
+    await route.fulfill({ response, body, headers:{ ...response.headers(), "content-security-policy":"default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob:; connect-src 'self'" } });
   });
   await ready(page);
   const target=page.locator("#clipped");
@@ -595,6 +595,63 @@ test("Blob SVGs obey a restrictive image CSP and stop revokes controller-owned U
   expect(await page.evaluate(() => window.cornerUrls.size)).toBeGreaterThan(0);
   await page.evaluate(() => window.serverCorners.stop());
   expect(await page.evaluate(() => window.cornerUrls.size)).toBe(0);
+});
+
+test("synchronous custom-element events and stop during paint preserve cleanup", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await ready(page);
+  await page.evaluate(() => {
+    customElements.define("synchronous-corner", class extends HTMLElement {
+      static observedAttributes = ["style", "data-xcss-server-corner-state"];
+      attributeChangedCallback() {
+        if (!this.armed) return;
+        const action = this.armed;
+        this.armed = null;
+        if (action === "stop") window.serverCorners.stop();
+        else this.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
+    const node = document.createElement("synchronous-corner");
+    node.id = "synchronous-corner";
+    node.style.cssText = "display:block;width:160px;height:100px;background:blue;--xcss-server-corner-extent:27px";
+    document.body.append(node);
+  });
+  const node = page.locator("#synchronous-corner");
+  await expect(node).toHaveAttribute("data-xcss-server-corner-state", "paint");
+  await node.evaluate(node => { node.armed = "event"; window.serverCorners.refresh(); });
+  await frame(page);
+  await expect(node).toHaveAttribute("data-xcss-server-corner-state", "paint");
+  await node.evaluate(node => { node.armed = "stop"; window.serverCorners.refresh(); });
+  await frame(page);
+  await expect(node).not.toHaveAttribute("data-xcss-server-corner-state");
+  await expect(node).toHaveCSS("background-color", "rgb(0, 0, 255)");
+  expect(errors).toEqual([]);
+});
+
+test("a controller uses the supplied iframe document and releases its styles", async ({ page }) => {
+  const errors = [];
+  page.on("pageerror", error => errors.push(error.message));
+  await ready(page);
+  const result = await page.evaluate(async () => {
+    const frame = document.createElement("iframe");
+    await new Promise(resolve => {
+      frame.addEventListener("load", resolve, { once: true });
+      frame.srcdoc = '<!doctype html><div id="surface" style="width:160px;height:100px;background:blue;--xcss-server-corner-extent:27px"></div>';
+      document.body.append(frame);
+    });
+    const iframeDocument = frame.contentDocument, node = iframeDocument.getElementById("surface");
+    const controller = window.startServerCorners(iframeDocument);
+    const before = node.getAttribute("data-xcss-server-corner-state");
+    const same = window.startServerCorners(iframeDocument) === controller;
+    controller.stop();
+    const after = node.getAttribute("data-xcss-server-corner-state");
+    const color = frame.contentWindow.getComputedStyle(node).backgroundColor;
+    frame.remove();
+    return { before, same, after, color };
+  });
+  expect(result).toEqual({ before: "paint", same: true, after: null, color: "rgb(0, 0, 255)" });
+  expect(errors).toEqual([]);
 });
 
 const inspectIndependent = (page, id) => page.evaluate(async id => {

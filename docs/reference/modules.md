@@ -33,7 +33,7 @@
 | Rust 浏览器 | `xcss_web::{api,components,i18n,theme}` | 独立 WASM CSR、认证、管理外壳与纯 Rust 函数式视图 |
 | Web 样式 | `@xcss/web/design-tokens`、`admin-ui/*.css` | 限定作用域的设计、表单、内容块及可访问性资源 |
 | Web 字体 | `@xcss/web/web-fonts` | 完整字体、样式、来源元数据和原许可证 |
-| Web 角标 | `@xcss/web/admin-ui/server-corners` | 显式启动和清理的窄 DOM 绘制适配器 |
+| Rust Web 轮廓 | `xcss_web::server_corners`、`mount_server` | 几何、SVG、DOM 观察、样式恢复与资源清理 |
 | Rust Web 构建 | `tools/web-build` | 固定 Rust/wasm-bindgen、独立源码快照与发行输入核验 |
 | 发布 | Python tools/scripts | 软件包归档、状态/发行身份、release-tree 和工作流校验 |
 
@@ -49,7 +49,7 @@ web/xcss-web/        独立 WASM crate、内部核心及过程宏源码快照
 
 package.json         唯一 @xcss/web 包的 exports、engine 和 platform 约束
 web/<module>/
-├─ src/              TypeScript 源码
+├─ src/              contracts/design-tokens 的 TypeScript 接口
 ├─ test/             从根 dist/<module> 导入的测试
 ├─ scripts/          内部资源复制步骤
 └─ schemas/fixtures/ contracts 的公开机器合同

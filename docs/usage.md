@@ -27,13 +27,13 @@ CSR 产品从固定的 `@xcss/web` 资源归档加载以下样式：
 @import "@xcss/web/admin-ui/styles.css";
 ```
 
-Server 在入口显式启动圆角渲染器，采用用户提供的 Mac mini 外壳模型所拟合的七次 Bézier 轮廓；client 的原生圆角由各平台单独实现。每个角沿用同一局部曲线并等比缩放，矩形的长宽差由连接直线承担。该模型的理想曲线与直线在端点满足 G3，运行时 SVG 使用受控离散近似。默认几何误差目标为 0.05 CSS px，运行时使用更小的 0.02 px 预算。这是本地硬件模型的拟合结果，不是经 Apple 认证的 UI mask 或 SwiftUI `.continuous` 算法。
+Server 的 Rust 浏览器入口通过 `mount_server` 启动共享圆角渲染器，采用用户提供的 Mac mini 外壳模型所拟合的七次 Bézier 轮廓；client 的原生圆角由各平台单独实现。每个角沿用同一局部曲线并等比缩放，矩形的长宽差由连接直线承担。该模型的理想曲线与直线在端点满足 G3，运行时 SVG 使用受控离散近似。默认几何误差目标为 0.05 CSS px，运行时使用更小的 0.02 px 预算。这是本地硬件模型的拟合结果，不是经 Apple 认证的 UI mask 或 SwiftUI `.continuous` 算法。
 
-```ts
-import { startServerCorners } from "@xcss/web/admin-ui/server-corners";
-const corners = startServerCorners(document);
-// 幂等启动；测试或卸载清理时调用 corners.stop()。
+```rust
+xcss_web::mount_server("root", App);
 ```
+
+几何、SVG 绘制、DOM 观察与清理由 `xcss_web::server_corners` 实现，首次绘制完成后才报告应用就绪。普通 `mount` 保留不启用该控制器的挂载方式。直接使用 `server_corners::start` 时须在视图存活期间持有控制器句柄；重复启动复用同一文档的控制器，停止或最后句柄释放时恢复作者样式并移除资源。静态 npm 资源包不再导出旧的 JavaScript 角标 API。
 
 `--xcss-server-corner-extent` 是显式选入属性，注册为不继承，避免面板中的普通文字、圆形和胶囊被误选。产品可以设置长度或短边百分比，并使用 `--xcss-server-corner-mode: clip` 选入媒体裁切；默认 `paint` 只绘制背景、边框和阴影。`data-xcss-server-corner="none"` 可显式排除。已有 `overflow:hidden/clip` 的表面使用固定在宿主坐标的 mask，缩放子图片仍按宿主轮廓裁切；mask 的白色外环保留边框盒外的原生焦点环和阴影。圆形、胶囊、零圆角导航和登录字段保留原形状。
 

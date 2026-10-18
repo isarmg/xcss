@@ -1,4 +1,7 @@
 use gloo_events::EventListener;
+#[cfg(target_arch = "wasm32")]
+#[path = "support/corner_api.rs"]
+mod corner_api;
 use xcss_web::{
     api,
     children::ToChildren,
@@ -20,7 +23,7 @@ pub fn start() {
         Some("path") => "/#workspace",
         _ => "",
     };
-    xcss_web::mount("root", move || {
+    xcss_web::mount_server("root", move || {
         component_view(
             AdminShell,
             component_props_builder(&AdminShell)

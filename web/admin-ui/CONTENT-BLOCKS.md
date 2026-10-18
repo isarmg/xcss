@@ -18,7 +18,7 @@
 不增加旧浏览器探测、polyfill 或旧圆角兼容层。生产Web构建使用Rust与wasm-bindgen，保留浏览器原生能力，
 不注入module-preload polyfill。
 
-服务端入口显式调用 `startServerCorners(document)`，使用 Mac mini 轮廓。
+服务端 Rust 浏览器入口调用 `xcss_web::mount_server`，使用共享 Rust 实现的 Mac mini 轮廓。
 普通控件、面板、提示和弹窗分别使用 27、42、48、54px 的角边界范围；
 这些值不是圆弧半径。圆形和胶囊保持自身形状；明确圆形的账号入口使用
 `data-xcss-server-corner="none"`。系统强制色彩模式使用系统颜色与清晰边界，

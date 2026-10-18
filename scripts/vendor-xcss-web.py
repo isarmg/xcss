@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Export committed browser or Web builder sources to explicit directories."""
+"""Export committed browser, builder or static asset snapshots to explicit directories."""
 from __future__ import annotations
 
 import argparse
@@ -38,6 +38,21 @@ def builder_payload(project: Path) -> dict[str, bytes]:
     return committed_payload(project, source, paths, "xcss-web-build")
 
 
+def assets_payload(project: Path) -> dict[str, bytes]:
+    """Distribute authored static assets without retired JavaScript behavior."""
+    source = project / "web"
+    paths = []
+    for name in ("admin-ui", "design-tokens"):
+        paths.extend(sorted((source / name).glob("*.css")))
+    paths.extend(source / "web-fonts" / name for name in (
+        "boot.css", "fonts.css", "provenance.json", "startup.json",
+        "MapleMonoFull-Regular.woff2", "MapleMonoFull-Bold.woff2",
+        "OFL.txt", "NORMAL-LICENSE.txt", "CJK-LICENSE.txt",
+    ))
+    paths.append(project / "LICENSE")
+    return committed_payload(project, source, paths, "@xcss/web")
+
+
 def committed_payload(project: Path, source: Path, paths: list[Path], package: str) -> dict[str, bytes]:
     for path in paths:
         if (not path.is_file() or path.stat().st_nlink != 1
@@ -46,11 +61,14 @@ def committed_payload(project: Path, source: Path, paths: list[Path], package: s
     relative = [path.relative_to(project).as_posix() for path in paths]
     subprocess.run(["git", "ls-files", "--error-unmatch", "--", *relative],
                    cwd=project, check=True, stdout=subprocess.DEVNULL)
-    entries = (("Cargo.toml", "Cargo.lock", "README.md", ".gitignore", "test-preview.mjs", "src", "tests")
+    entries = (("admin-ui", "design-tokens", "web-fonts") if package == "@xcss/web" else
+               ("Cargo.toml", "Cargo.lock", "README.md", ".gitignore", "test-preview.mjs", "src", "tests")
                if package == "xcss-web-build" else
                ("Cargo.toml", "README.md", "startup.js", "startup.css", "tests/startup-failures.mjs",
                 "src", "vendor/xcss-web-core", "vendor/xcss-web-macro"))
     distribution_paths = ["LICENSE", *[(source.relative_to(project) / name).as_posix() for name in entries]]
+    if package == "@xcss/web":
+        distribution_paths.append("package.json")
     revision = subprocess.check_output(
         ["git", "log", "-1", "--format=%H", "--", *distribution_paths], cwd=project, text=True,
     ).strip()
@@ -74,7 +92,12 @@ def committed_payload(project: Path, source: Path, paths: list[Path], package: s
         object_id = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
         if committed.get(path) != object_id:
             raise ValueError(f"Source bytes differ from the committed snapshot: {path}")
-    version = tomllib.loads(payload["Cargo.toml"].decode())["package"]["version"]
+    if package == "@xcss/web":
+        version = json.loads(subprocess.check_output(
+            ["git", "show", f"{revision}:package.json"], cwd=project,
+        ))["version"]
+    else:
+        version = tomllib.loads(payload["Cargo.toml"].decode())["package"]["version"]
     metadata = {
         "format": 1, "package": package, "version": version,
         "origin": "https://github.com/isarmg/xcss", "base_revision": revision,
@@ -150,12 +173,12 @@ def synchronize(destination: Path, payload: dict[str, bytes], *, check: bool) ->
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
-    parser.add_argument("--component", choices=("browser", "builder"), default="browser")
+    parser.add_argument("--component", choices=("browser", "builder", "assets"), default="browser")
     parser.add_argument("--destination", required=True, type=Path, action="append")
     args = parser.parse_args()
     try:
         project = Path(__file__).resolve().parents[1]
-        payload = (browser_payload if args.component == "browser" else builder_payload)(project)
+        payload = {"browser": browser_payload, "builder": builder_payload, "assets": assets_payload}[args.component](project)
         for destination in args.destination:
             synchronize(destination, payload, check=args.check)
             print(f"{destination}: {json.loads(payload['SOURCE.json'])['package']} source {'verified' if args.check else 'copied'}")

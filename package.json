@@ -84,10 +84,6 @@
     "./web-fonts/OFL.txt": "./dist/web-fonts/OFL.txt",
     "./web-fonts/CJK-LICENSE.txt": "./dist/web-fonts/CJK-LICENSE.txt",
     "./admin-ui/styles.css": "./dist/admin-ui/styles.css",
-    "./admin-ui/server-corners": {
-      "types": "./dist/admin-ui/server-corners.d.ts",
-      "import": "./dist/admin-ui/server-corners.js"
-    },
     "./admin-ui/content-blocks.css": "./dist/admin-ui/content-blocks.css",
     "./admin-ui/date-range.css": "./dist/admin-ui/date-range.css",
     "./web-fonts/MapleMonoFull-Regular.woff2": "./dist/web-fonts/MapleMonoFull-Regular.woff2",

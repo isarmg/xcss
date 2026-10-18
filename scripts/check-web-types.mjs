@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 const root = fileURLToPath(new URL("../", import.meta.url));
-for (const name of ["contracts", "design-tokens", "admin-ui"]) {
+for (const name of ["contracts", "design-tokens"]) {
   const config = "tsconfig.json";
   const result = spawnSync(process.execPath, [join(root, "node_modules/typescript/bin/tsc"), "-p", config, "--noEmit"], { cwd: join(root, "web", name), stdio: "inherit" });
   if (result.error) throw result.error;
